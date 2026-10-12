@@ -14,7 +14,7 @@ spdx:
   floor: "2.2"
   accepted_versions: ["2.2", "2.3"]
 acceptance: profile          # profile | checkmarx (real upload per level) | schema-only
-allow_downgrade: false      # fix repairs on the file's own schema version; true (or --allow-downgrade) steps down one version at a time
+allow_downgrade: false      # repairs on the file's own schema version; true steps down one version at a time
 tools_form: as-is            # as-is | legacy-array (use legacy-array if Checkmarx only reads the 1.4 array form)
 ensure_tools: true           # add sbom-fixer to metadata.tools (SPDX: creators) when the SBOM names no tool
 flatten_nested_components: true
@@ -48,7 +48,7 @@ canonical:
   # Checkmarx canonical form (CXN-*): the minimal cyclonedx-dotnet layout that Checkmarx One SCA ingests reliably.
   # Each component becomes {bom-ref, type, name, version, purl, licenses}; metadata becomes {timestamp, tools,
   # component}; dependencies point only at existing components. The spec version is never changed.
-  # Set "enabled: false" (or run fix with --no-canonical) to keep every field and only repair.
+  # The fix command always writes this form (with the tool name of the detected ecosystem).
   enabled: true
   tools:                       # metadata.tools in the 1.4 array form (valid in every CycloneDX version)
     - vendor: AppThreat
