@@ -79,7 +79,8 @@ def output_stem(input_path: Path) -> str:
 
 def run_fix(input_path: Path, profile: Profile, out_dir: Path | None = None, *, acceptance: str | None = None,
             client: AcceptanceClient | None = None, max_uploads: int = 6, audit: bool = True, write: bool = True,
-            dry_run: bool = False, progress: Any = None, sbom_name: str | None = None) -> RunResult:
+            dry_run: bool = False, progress: Any = None, sbom_name: str | None = None,
+            reports: bool = True) -> RunResult:
     raw = input_path.read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
     mode = acceptance or profile.acceptance
@@ -94,7 +95,7 @@ def run_fix(input_path: Path, profile: Profile, out_dir: Path | None = None, *, 
     except DetectError as exc:
         result.error = str(exc)
         result.exit_code = EXIT_CANNOT_FIX
-        if write:
+        if write and reports:
             _write_failure(result, out_dir, stem)
         return result
     result.detected = detected
@@ -113,7 +114,7 @@ def run_fix(input_path: Path, profile: Profile, out_dir: Path | None = None, *, 
         profile.rules_for(detected.spec)
     except (ValueError, SbomFixerError) as exc:
         result.error = str(exc)
-        if write:
+        if write and reports:
             _write_failure(result, out_dir, stem)
         return result
 
@@ -156,7 +157,7 @@ def run_fix(input_path: Path, profile: Profile, out_dir: Path | None = None, *, 
         if result.ok:
             result.coverage = classify(doc, detected.spec, profile.purl, log)
     result.exit_code = _exit_code(result)
-    if write:
+    if write and reports:
         progress("writing reports (diff, change log, notes)")
         _write_reports(result, out_dir, stem, dry_run)
     progress(f"done, exit code {result.exit_code}")

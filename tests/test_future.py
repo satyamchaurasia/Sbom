@@ -12,7 +12,6 @@ from sbom_fixer.errors import ProfileError
 from sbom_fixer.pipeline import run_fix
 from sbom_fixer.profile import Profile, load_profile, parse_profile
 from sbom_fixer.schemas import is_future
-from sbom_fixer.serialize import write_json
 from sbom_fixer.validate import validate
 
 from .conftest import CORPUS, bom, ids, repair_only, run
@@ -75,18 +74,11 @@ def test_cli_commands_keep_16_and_17(version: str, tmp_path: Path) -> None:
     src = CORPUS / "minimal" / f"min-cdx-{version}.json"
     runner = CliRunner()
     for profile_name in ("checkmarx", "checkmarx-cli"):
-        res = runner.invoke(app, ["check", str(src), "-p", profile_name])
-        assert res.exit_code == 1 and f"level {version}  : ACCEPTED" in res.output, res.output  # 1: canonical form
-        res = runner.invoke(app, ["check", str(src), "-p", profile_name, "--no-canonical"])
-        assert res.exit_code == 0 and f"level {version}  : ACCEPTED" in res.output, res.output
-    res = runner.invoke(app, ["fix", str(src), "-p", "checkmarx", "-p", "checkmarx-cli", "-p", "compliance",
-                              "--out", str(tmp_path), "--no-audit"])
-    assert res.exit_code == 1, res.output  # the checkmarx copies are rewritten to the canonical form
-    for profile_name in ("checkmarx", "checkmarx-cli", "compliance"):
-        out = json.loads((tmp_path / f"min-cdx-{version}.{profile_name}.cdx.json").read_text(encoding="utf-8"))
+        res = runner.invoke(app, ["fix", str(src), "-p", profile_name, "--out", str(tmp_path / profile_name),
+                                  "--no-audit"])
+        assert res.exit_code == 1, res.output  # rewritten to the canonical form
+        out = json.loads((tmp_path / profile_name / f"min-cdx-{version}.corrected.cdx.json").read_text(encoding="utf-8"))
         assert out["specVersion"] == version
-    res = runner.invoke(app, ["audit", str(src), "--json"])
-    assert res.exit_code == 0
 
 
 def test_accepted_override_still_caps_17_to_16() -> None:
@@ -179,18 +171,6 @@ def test_future_end_to_end(tmp_path: Path) -> None:
     assert "B (downgrade 1.8 -> 1.7)" in notes and "generic future hop to 1.7" in notes and "CDX-FWD-002" in notes
     again = run_fix(Path(r.outputs["sbom"]), repair_only(load_profile("checkmarx")), tmp_path / "again")
     assert again.exit_code == 0
-
-
-def test_future_check_command_is_read_only(tmp_path: Path) -> None:
-    from typer.testing import CliRunner
-
-    from sbom_fixer.cli import app
-
-    src = tmp_path / "f.json"
-    write_json(future_doc(), src)
-    res = CliRunner().invoke(app, ["check", str(src)])
-    assert res.exit_code == 1 and "level 1.7  : ACCEPTED" in res.output
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["f.json"]
 
 
 @pytest.mark.parametrize("sec,msg", [

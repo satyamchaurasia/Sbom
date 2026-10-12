@@ -7,7 +7,7 @@ For each SBOM the tool:
 1. Checks the file against the schema of the version it **declares**, and repairs what can be repaired without guessing.
 2. If the corrected file is OK (schema-valid **and** accepted by the consumer), it stops. The version does not change.
 3. Errors no repair rule can fix are resolved **on the same schema**: a value of the wrong JSON type is converted when the meaning is clear (COERCE-001), otherwise the rejected value is removed and reported as DATA_LOSS (COERCE-002).
-4. **The version never changes.** A version the profile does not list is kept with a warning (VER-KEEP). The only exceptions: CycloneDX 1.8+ (no schema exists) is brought to 1.7, and `--allow-downgrade` (or `allow_downgrade: true` in a profile) turns on the old behaviour of stepping down one version at a time (for example 1.7 to 1.6) with the hop rules.
+4. **The version never changes.** A version the profile does not list is kept with a warning (VER-KEEP). The only exceptions: CycloneDX 1.8+ (no schema exists) is brought to 1.7, and `allow_downgrade: true` in a profile turns on the old behaviour of stepping down one version at a time (for example 1.7 to 1.6) with the hop rules.
 
 For Checkmarx (profiles `checkmarx` and `checkmarx-cli`) it also:
 
@@ -18,9 +18,9 @@ For Checkmarx (profiles `checkmarx` and `checkmarx-cli`) it also:
   every component becomes `{bom-ref, type, name, version, purl, licenses}` with a purl of the form
   `pkg:type/[namespace/]name@version` (built from the ecosystem, else `pkg:generic/...`, never null) and a licence
   (`NOASSERTION` when there is none); `dependencies` point only at components that exist, without self-references.
-  Configure it in the profile's `canonical:` section; `--no-canonical` keeps every field and only repairs;
+  Configure it in the profile's `canonical:` section.
 
-- keeps CycloneDX 1.6 and 1.7 at their own version in every profile (`checkmarx`, `checkmarx-cli`, `compliance`); nothing steps down unless `--allow-downgrade` is given;
+- keeps CycloneDX 1.6 and 1.7 at their own version in every profile (`checkmarx`, `checkmarx-cli`, `compliance`); nothing steps down unless the profile sets `allow_downgrade: true`;
 - brings a newer CycloneDX version (1.8, 1.9, ...) down to 1.7 with a generic "future hop" (CDX-FWD-*);
 - keeps every purl type Checkmarx supports as written, repairs the format Checkmarx cannot match (npm `@` scope, missing version or groupId, URL qualifiers), remaps unsupported types only on hard evidence (CXP-010..013) and lists every component Checkmarx will skip;
 - converts a purl written as a web URL (`https://...`) into the real purl when it is a registry URL (SAN-009);
@@ -48,48 +48,45 @@ docker run --rm -v "$PWD:/work" -w /work sbom-fixer:1.0.0 fix build/sbom.json --
 
 Python 3.11 or newer. The tool never uses the network except for the optional Checkmarx commands.
 
-The sbomqs quality score works offline out of the box: sbomqs 2.1.2 is vendored in `tools/sbomqs` (Windows x64 binary, Linux x64 archive, checksums, licence) and found automatically. Order: `SBOMQS_BIN`, then `tools/sbomqs`, then `PATH`. `sbom-fixer audit <file>` prints the score, grade and the binary it used. Details: `tools/sbomqs/README.md`.
+The sbomqs quality score works offline out of the box: sbomqs 2.1.2 is vendored in `tools/sbomqs` (Windows x64 binary, Linux x64 archive, checksums, licence) and found automatically. Order: `SBOMQS_BIN`, then `tools/sbomqs`, then `PATH`. Details: `tools/sbomqs/README.md`.
 
 ## Use
 
+The tool has three commands:
+
 ```bash
-sbom-fixer check sbom.json                          # read-only: errors grouped by cause + version path a fix would take
-sbom-fixer fix sbom.json --out out/                 # write the fixed SBOM and reports (profile: checkmarx)
-sbom-fixer fix sbom.json -p checkmarx -p compliance # Checkmarx copy + compliance copy in one run
-sbom-fixer fix sbom.json -p checkmarx-cli           # for upload with the cx CLI (same versions as checkmarx)
-sbom-fixer audit sbom.json                          # NTIA minimum elements + sbomqs score only
-sbom-fixer schema-diff 1.5 1.6                      # what changed between two schema versions
-sbom-fixer rules                                    # every rule with its case and kind
-sbom-fixer verify out/sbom.checkmarx.cdx.json       # upload to the Checkmarx verification project
-sbom-fixer bisect failing.json                      # find the field that makes Checkmarx reject a file
-sbom-fixer fill-required any.json --out out/        # schema-valid with every mandatory field (derive, else placeholder)
-sbom-fixer fill-all any.json --out out/             # schema-valid with every schema field (derive, else placeholder)
-sbom-fixer cdxgen-fix any.json --out out/           # any SBOM -> cdxgen layout -> Checkmarx canonical form -> out/Copilot_SBOM.json
+sbom-fixer fix sbom.json --out out/                # any SBOM -> out/sbom.corrected.cdx.json + tech-notes.md + suggestions.md
+sbom-fixer fill-all any.json --out out/                  # schema-valid with every schema field (derive, else placeholder)
+sbom-fixer verify out/sbom.corrected.cdx.json            # upload to the Checkmarx verification project and check the import
 ```
 
-Useful options for `fix`:
+`check`, `audit`, `fill-required`, `schema-diff`, `bisect`, `rules` and `cdxgen-fix` were removed. `fix` is now
+the former `cdxgen-fix` (convert, correct, tech notes, suggestions); its SBOM is `<name>.corrected.cdx.json`.
+
+Options of `fix`:
 
 | Option | Effect |
 |---|---|
-| `--accepted 1.4,1.5` | Override the profile's accepted CycloneDX versions for this run (without `--allow-downgrade` it only decides the VER-KEEP warning) |
-| `--allow-downgrade` | Step down one version at a time when the file is not accepted at its own version (off by default) |
-| `--verify-each-step` | Ask Checkmarx (real upload) at each level instead of the profile list; `--max-uploads` sets the budget |
-| `--verify --expected-packages N` | Upload the final file and check the package count (5% tolerance) |
+| `--out DIR` | Output folder (default: next to the input) |
+| `--name FILE` | File name of the corrected SBOM (default `<name>.corrected.cdx.json`) |
+| `--profile checkmarx-cli` | Profile (default `checkmarx`; `checkmarx-cli` for an upload with the cx CLI) |
+| `--ecosystem java` | Force the ecosystem that names `metadata.tools` instead of detecting it |
+| `--spec-version 1.6` | CycloneDX version of the converted file (default: CycloneDX keeps its version, SPDX becomes 1.6) |
+| `--keep-converted` | Also write the step-1 file `<name>.converted.cdx.json` |
 | `--no-audit` | Skip the NTIA / sbomqs audit |
-| `--no-canonical` | Keep every field (only repair); by default the Checkmarx profiles write the canonical form (CXN-*) |
 
 On Windows PowerShell 5.1, never write SBOMs with `>`; it produces UTF-16. The tool always writes its files itself.
 
-## Any SBOM to the Checkmarx form: `cdxgen-fix`
+## Any SBOM to the Checkmarx form: `fix`
 
 ```bash
-sbom-fixer cdxgen-fix sbom.json --out out/                     # writes out/Copilot_SBOM.json
-sbom-fixer cdxgen-fix sbom.spdx.json --out out/ --ecosystem dotnet --name app.cdx.json
+sbom-fixer fix sbom.json --out out/                     # writes out/sbom.corrected.cdx.json + 2 .md files
+sbom-fixer fix sbom.spdx.json --out out/ --ecosystem dotnet --name app.cdx.json
 ```
 
 Three steps:
 
-1. **cdxgen layout** (`<name>.cdxgen.cdx.json`). cdxgen builds SBOMs from source code and cannot read an existing SBOM,
+1. **convert** (kept only with `--keep-converted`: `<name>.converted.cdx.json`). cdxgen builds SBOMs from source code and cannot read an existing SBOM,
    so this step gives any SBOM the shape cdxgen writes. SPDX 2.2/2.3 JSON becomes CycloneDX 1.6: packages become
    components (purl from `externalRefs`, licences from `licenseConcluded`/`licenseDeclared`, checksums become hashes),
    `DEPENDS_ON` and `*_DEPENDENCY_OF` become dependencies, and the single described package (else the document) becomes
@@ -97,10 +94,15 @@ Three steps:
    set to the purl, and every component gets a dependencies entry.
    Purls written as a URL become the registry purl (registry downloads and package pages: npmjs.com, pypi.org,
    mvnrepository.com, nuget.org, crates.io, packagist.org, hex.pm, rubygems.org, pkg.go.dev, Maven Central).
-2. **schema validation**: the converted file is validated against its CycloneDX schema; the errors are printed
-   grouped by cause and saved in the report (`validation`).
+2. **schema validation**: the original is validated against its own schema and the converted file against its
+   CycloneDX schema; the errors are printed grouped by cause and listed in the two Markdown files.
 3. **fix + canonical form** (the `#2` prompt). The repair fixes those errors on the same version, then the canonical
-   rules CXN-* apply (see above), and the result is validated again before it is written. **No purl or bom-ref holds
+   rules CXN-* apply (see above), and the result is validated again before it is written. The top level is
+   `bomFormat`, `specVersion` (never changed), `serialNumber`, `version`, `metadata`, `components`, `dependencies`;
+   `components` is always written, `[]` when the input has none (the schema's top-level list is `components`; the
+   singular `component` is the root application in `metadata.component`, also always written: when the input has
+   none it is `{"type": "application", "name": ""}` (plus `"version": ""` on CycloneDX 1.2/1.3, where the schema
+   requires it), and a root without a name or type gets them blank instead of being dropped). **No purl or bom-ref holds
    a web URL** (http/https, also percent-encoded): a URL that is not a known registry is moved out of the purl and the
    component gets `pkg:generic/<name>@<version>`. `metadata.tools` is named after the **detected ecosystem**:
 
@@ -120,19 +122,24 @@ Three steps:
    evidence the profile's default tool (`cyclonedx-dotnet`) is kept. `--ecosystem java` skips the detection. The
    names can be changed in a profile: `canonical.ecosystem_tools: {java: cyclonedx-maven}`.
 
-Outputs in `--out`: `Copilot_SBOM.json` (`--name`), `<name>.cdxgen.cdx.json` (step 1), `<name>.cdxgen.report.json`
-(source, conversion notes, the tool decision), and the usual `<name>.cdxgen.checkmarx.*` notes, change log, diff and
-purl coverage of step 2. Exit codes as for `fix`. `fix` itself is unchanged; it keeps the profile's fixed tool list.
+Outputs in `--out`, three files only:
 
-## Fill missing fields: `fill-required` and `fill-all`
+| File | Content |
+|---|---|
+| `<name>.corrected.cdx.json` (`--name`) | the fixed SBOM to upload |
+| `<name>.tech-notes.md` | summary (input, output, tool, change counts, exit code), the three steps, every change grouped by rule as *fix* (a problem of the input) or *layout* (reshaped for Checkmarx), findings |
+| `<name>.suggestions.md` | issues of the original to fix at the generator: its own schema errors (with how to fix), every data problem sbom-fixer repaired (count, examples, fix at the source), generator and pipeline hints |
 
-Two commands that take **any JSON** and return a schema-valid SBOM with more fields filled:
+No change log, diff, notes or report JSON is written. Exit codes: see below.
+
+## Fill every field: `fill-all`
+
+Takes **any JSON** and returns a schema-valid SBOM with every schema field filled:
 
 ```bash
-sbom-fixer fill-required sbom.json --out out/   # every MANDATORY field of the schema
 sbom-fixer fill-all      sbom.json --out out/   # EVERY field the schema defines (required and optional)
 sbom-fixer fill-all      sbom.json --include-sensitive   # also hashes, signatures, vulnerabilities, crypto
-sbom-fixer fill-required components.json --spec cyclonedx --version 1.7   # plain JSON / pick the version
+sbom-fixer fill-all      components.json --spec cyclonedx --version 1.7   # plain JSON / pick the version
 ```
 
 Steps, in this order:
@@ -140,7 +147,7 @@ Steps, in this order:
 1. **Read any JSON.** A JSON array becomes the components (SPDX: packages); an object without `bomFormat`/`spdxVersion` is
    CycloneDX (or `--spec`); a missing or unknown version becomes 1.6 / 2.3 (or `--version`); CycloneDX 1.8+ goes to 1.7
    with the future hop. Only invalid JSON syntax and SPDX 3.0 are refused (exit 2).
-2. **Derive required fields first** (so nothing is dropped), then run the `fix` repair and sanitize rules at that version
+2. **Derive required fields first** (so nothing is dropped), then run the repair and sanitize rules at that version
    (wrong case, wrong types, bad dates, licence shapes, bad hashes, unknown fields). Never a downgrade.
 3. **Fill** each missing field, in this order of preference: `derived` from the SBOM (purl → name/version/group, bom-ref →
    purl, publisher ↔ supplier, hash length → alg, evidence → licenses/copyright, purl qualifiers → externalReferences,
@@ -156,38 +163,25 @@ references to other elements (`ref`, `dependsOn`, `assemblies`, relationships). 
 package. `fill-all` does not expand deprecated fields or recursive structures (components inside new components); objects
 created deeper than 4 levels get only their required fields.
 
-Big files: `fill-all` adds every schema field to every component, so 5,000 components become about 1.7 million fields (~50x the input, about a minute). Above 5,000 entries the report groups fields by path pattern. For a Checkmarx upload use `fill-required` (+ `fix`).
+Big files: `fill-all` adds every schema field to every component, so 5,000 components become about 1.7 million fields (~50x the input, about a minute). Above 5,000 entries the report groups fields by path pattern. For a Checkmarx upload use `fix`.
 
-Outputs: `<name>.fill-<required|all>.<cdx|spdx>.json` and `<name>.fill-<required|all>.<cdx|spdx>.report.json` with
-`prepared` (how the input was read), `repairs` (fix rules applied), `removed_invalid` (converted or removed values),
+Outputs: `<name>.fill-all.<cdx|spdx>.json` and `<name>.fill-all.<cdx|spdx>.report.json` with
+`prepared` (how the input was read), `repairs` (repair rules applied), `removed_invalid` (converted or removed values),
 `fills` (every added field with its source), `skipped` and `unresolved_required`. Exit 0 = schema-valid output, 1 = some
 errors could not be resolved (see the report), 2 = not JSON / unsupported format.
 
-## Outputs
-
-For `out/<name>.<profile>.*`:
-
-| File | Content |
-|---|---|
-| `<name>.checkmarx.cdx.json` | The fixed SBOM (UTF-8 without BOM, LF) |
-| `<name>.checkmarx.diff.patch.json` | RFC 6902 JSON Patch from original to fixed |
-| `<name>.checkmarx.diff.txt` | Human diff (unified diff for small files, one line per patch operation for large ones) |
-| `<name>.checkmarx.changes.json` | Change log: every change with rule ID, path, before, after, severity, level |
-| `<name>.checkmarx.notes.txt` | Why the original failed, version path, changes by rule, data loss, scan coverage, source fixes, quality |
-| `<name>.checkmarx.quality.json` | NTIA coverage and sbomqs score before and after, framework results |
-| `<name>.checkmarx.purl-coverage.csv` | One row per component: original and final purl, Checkmarx package manager, status (supported, fixed, remapped, versionless, unsupported, os-package, missing, malformed), rule IDs, reason. Only for profiles with a `purl:` section |
-
 ## Exit codes
+
+Exit codes of `fix` (`fill-all`: 0 schema-valid, 1 errors left, 2 not JSON; `verify`: 0 imported, 5 failed):
 
 | Code | Meaning |
 |---|---|
 | 0 | Already compatible; output identical to input |
-| 1 | Fixed |
+| 1 | Corrected |
 | 2 | Cannot fix: unsupported format, a version with no schema (CycloneDX 1.0/1.1, 2.x), or schema errors that even the same-version coercion could not resolve |
 | 3 | DATA_LOSS changes happened and the profile sets `allow_data_loss: false` |
 | 4 | Quality gate failed (profile `quality.audit: gate`) |
 | 5 | Checkmarx verification failed |
-| 6 | Bisect inconclusive |
 | 7 | Fixed, but no component has a purl type the profile supports; Checkmarx would fail the scan ("no valid PURLs"), so do not upload |
 
 ## Profiles
@@ -197,7 +191,7 @@ Built in: `checkmarx` (web portal), `checkmarx-cli` (cx CLI / Jenkins, same vers
 ```yaml
 name: checkmarx
 cyclonedx:
-  floor: "1.2"                              # lowest version for --allow-downgrade ("declared" = never)
+  floor: "1.2"                              # lowest version when allow_downgrade is true ("declared" = never)
   accepted_versions: ["1.2", "1.3", "1.4", "1.5", "1.6", "1.7"]  # 1.7 PROVISIONAL until docs/checkmarx-matrix.md is filled in
   max_version: "1.7"                        # newer declared versions (1.8+) are brought down to this one
   future_versions: downgrade                # downgrade | reject (default reject)
@@ -251,7 +245,7 @@ python tools/vendor_schemas.py       # only when upgrading schemas; commit with 
 python tools/vendor_sbomqs.py 2.1.2  # only when upgrading sbomqs; also set ARG SBOMQS_VERSION in the Dockerfile
 ```
 
-Adding a rule follows the seven-step recipe in the Implementation Plan (evidence, classify, fixture, implement, describe, run everything, catalog). `docs/rule-catalog.md` is generated with `sbom-fixer rules --markdown`.
+Adding a rule follows the seven-step recipe in the Implementation Plan (evidence, classify, fixture, implement, describe, run everything, catalog).
 
 ## How the stories map to the code
 

@@ -9,6 +9,7 @@ from packageurl import PackageURL
 from .changes import DATA_LOSS, WARN
 from .jsonutil import iter_components
 from .rules import describe, rule_by_id
+from .rules.canonical import is_reduction
 from .validate import group
 
 if TYPE_CHECKING:
@@ -81,7 +82,7 @@ def source_fixes(result: RunResult) -> list[str]:
     seen: set[str] = set()
     for c in result.log.changes:
         r = rule_by_id(c.rule_id)
-        if r is not None and r.source_fix and r.id not in seen:
+        if r is not None and r.source_fix and r.id not in seen and not is_reduction(c):
             seen.add(r.id)
             out.append(f"[{r.id}] {r.source_fix}")
     for f in result.log.findings:

@@ -117,17 +117,6 @@ def test_fix_reports_sbomqs_before_and_after(tmp_path: Path) -> None:
     assert "sbomqs score (0-10)" in notes and "n/a" not in notes.split("sbomqs score (0-10)")[1].splitlines()[0]
 
 
-@needs_binary
-@pytest.mark.usefixtures("offline")
-def test_audit_command_shows_grade_and_binary() -> None:
-    from typer.testing import CliRunner
-
-    from sbom_fixer.cli import app
-
-    res = CliRunner().invoke(app, ["audit", str(CORPUS / "minimal" / "min-cdx-1.6.json")])
-    assert res.exit_code == 0 and "(grade " in res.output and "sbomqs binary:" in res.output
-
-
 def test_found_in_current_folder_when_installed_as_wheel(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A wheel install lives in site-packages; run from the checkout, tools/sbomqs in the current folder is used."""
     monkeypatch.delenv("SBOMQS_BIN", raising=False)

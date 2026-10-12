@@ -9,9 +9,7 @@ from typing import Any
 
 import pytest
 import yaml
-from typer.testing import CliRunner
 
-from sbom_fixer.cli import app
 from sbom_fixer.diff import apply_patch
 from sbom_fixer.errors import ProfileError
 from sbom_fixer.pipeline import run_fix
@@ -81,7 +79,8 @@ def test_ratecard_gradle_sbom_matches_prompt_layout(tmp_path: Path) -> None:
     assert_canonical(out, "1.5")
     assert out["serialNumber"] == r.original_doc["serialNumber"]
     assert out["metadata"]["timestamp"] == r.original_doc["metadata"]["timestamp"]
-    assert out["metadata"]["component"] == r.original_doc["metadata"]["component"]
+    root = dict(r.original_doc["metadata"]["component"], purl="pkg:maven/com.sintecmedia.ratecard/ratecards@1.0")
+    assert out["metadata"]["component"] == root  # same purl form as the components (no ?type=jar)
     first = out["components"][0]
     assert first == {"bom-ref": "pkg:maven/com.fasterxml/classmate@1.7.3?type=jar", "type": "library",
                      "name": "classmate", "version": "1.7.3", "purl": "pkg:maven/com.fasterxml/classmate@1.7.3",
@@ -142,7 +141,8 @@ def test_bom_ref_missing_or_duplicate() -> None:
     b = {"type": "library", "name": "b", "version": "1"}
     out, res, _ = checkmarx_doc(bom("1.5", components=[a, b]))
     assert res.ok
-    assert [c["bom-ref"] for c in out["components"]] == ["pkg:npm/a@1", "pkg:generic/b@1"]
+    # b has no purl; the SBOM is npm only, so it gets an npm purl (and that as bom-ref)
+    assert [c["bom-ref"] for c in out["components"]] == ["pkg:npm/a@1", "pkg:npm/b@1"]
 
 
 def test_dependencies_dangling_self_duplicate_and_merge() -> None:
@@ -238,14 +238,3 @@ def test_both_checkmarx_profiles_are_canonical() -> None:
         assert load_profile(name).canonical is not None
     assert load_profile("compliance").canonical is None
 
-
-def test_cli_no_canonical_keeps_fields(tmp_path: Path) -> None:
-    src = ROOT / "ratecard-sbom.json"
-    res = CliRunner().invoke(app, ["fix", str(src), "--out", str(tmp_path / "a"), "--no-audit", "--no-canonical"])
-    assert res.exit_code == 0, res.output
-    out = json.loads((tmp_path / "a" / "ratecard-sbom.checkmarx.cdx.json").read_text(encoding="utf-8"))
-    assert "hashes" in out["components"][0]
-    res = CliRunner().invoke(app, ["fix", str(src), "--out", str(tmp_path / "b"), "--no-audit"])
-    assert res.exit_code == 1, res.output
-    out = json.loads((tmp_path / "b" / "ratecard-sbom.checkmarx.cdx.json").read_text(encoding="utf-8"))
-    assert set(out["components"][0]) == FIELDS

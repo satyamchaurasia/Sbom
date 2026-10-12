@@ -21,7 +21,7 @@ so a checkout scores SBOMs **offline** without installing anything.
 
 Without any of them the audit still runs and shows the score as `n/a`.
 
-Check which binary is used: `sbom-fixer audit some-sbom.json` prints `sbomqs binary: <path>`.
+The binary is found in this order: `SBOMQS_BIN`, `tools/sbomqs`, `PATH`.
 
 ## Use it directly
 

@@ -45,6 +45,22 @@ class CanonicalRule(Rule):
         raise NotImplementedError
 
 
+def is_reduction(change: Any) -> bool:
+    """True for a canonical change that only trims the layout for Checkmarx (dropped sections and fields, reshaped
+    metadata, flattened nesting, shortened licences): not an issue of the original SBOM."""
+    rid, action, reason = change.rule_id, change.action, change.reason or ""
+    if rid == "CXN-001" or (rid == "CXN-011" and not change.path.startswith("/metadata/component")):
+        return True
+    if rid in ("CXN-010", "CXN-040") and action == "removed":
+        return True
+    if rid == "CXN-030" and action == "replaced":
+        return True
+    if rid in ("CXN-020", "CXN-040") and change.path.endswith("/purl") and isinstance(change.before, str):
+        # only qualifiers (?type=jar) or the subpath dropped: a valid purl, shortened for this copy
+        return re.split(r"[?#]", change.before, maxsplit=1)[0] == change.after
+    return rid == "CXN-050" and reason.startswith("dependency fields")
+
+
 def _components(doc: dict[str, Any]) -> list[dict[str, Any]]:
     comps = doc.get("components")
     return [c for c in comps if isinstance(c, dict)] if isinstance(comps, list) else []
@@ -105,6 +121,38 @@ def _ecosystem(c: dict[str, Any]) -> str | None:
     return None
 
 
+# ecosystem (ecosystem.py) -> purl type for components that have no purl
+ECOSYSTEM_PURL_TYPE = {
+    "dotnet": "nuget", "java": "maven", "node": "npm", "python": "pypi", "go": "golang", "ruby": "gem",
+    "php": "composer", "rust": "cargo", "erlang": "hex", "dart": "pub", "swift": "swift", "cpp": "conan",
+    "perl": "cpan",
+}
+_NEEDS_NAMESPACE = {"maven", "composer", "swift"}
+
+
+def document_ecosystem(doc: dict[str, Any]) -> str | None:
+    """The one ecosystem the whole SBOM belongs to, or None when it is mixed or unknown. Used only to build purls for
+    components without one: every component purl that exists is of that ecosystem (or there are none and the root
+    component or the generator names it)."""
+    res = detect_ecosystem(doc)
+    if res.ecosystem is None or len(res.counts) > 1:
+        return None
+    return res.ecosystem
+
+
+def _from_references(c: dict[str, Any], version: str | None) -> PackageURL | None:
+    """purl from a registry URL in the component's externalReferences (distribution, website, vcs, ...)."""
+    from ..purlmap import purl_from_url
+
+    for ref in c.get("externalReferences") or []:
+        url = ref.get("url") if isinstance(ref, dict) else None
+        if isinstance(url, str):
+            p = purl_from_url(url, version, allow_github=False)
+            if p is not None:
+                return p
+    return None
+
+
 _URL_IN_PURL = re.compile(r"https?(:|%3a)", re.IGNORECASE)
 
 
@@ -123,12 +171,14 @@ def _dashes(name: str) -> str:
     return re.sub(r"\s+", "-", text) or "package"
 
 
-def canonical_purl(c: dict[str, Any], keep_qualifiers: bool, fallback: str) -> tuple[str | None, str]:
-    """(purl, how) for a component. how: kept | normalized | from-bom-ref | built | generic | none.
+def canonical_purl(c: dict[str, Any], keep_qualifiers: bool, fallback: str,
+                   doc_ecosystem: str | None = None) -> tuple[str | None, str]:
+    """(purl, how) for a component. how: kept | normalized | from-bom-ref | built | from-url | from-ecosystem |
+    generic | none.
 
     The result never contains a web URL (http/https, also percent-encoded): Checkmarx cannot match such a purl.
     """
-    purl, how = _canonical_purl(c, keep_qualifiers, fallback)
+    purl, how = _canonical_purl(c, keep_qualifiers, fallback, doc_ecosystem)
     if purl is not None and has_url(purl):
         p = try_purl(purl)
         if p is not None and not has_url(PackageURL(type=p.type, namespace=p.namespace, name=p.name,
@@ -141,7 +191,8 @@ def canonical_purl(c: dict[str, Any], keep_qualifiers: bool, fallback: str) -> t
     return purl, how
 
 
-def _canonical_purl(c: dict[str, Any], keep_qualifiers: bool, fallback: str) -> tuple[str | None, str]:
+def _canonical_purl(c: dict[str, Any], keep_qualifiers: bool, fallback: str,
+                    doc_ecosystem: str | None = None) -> tuple[str | None, str]:
     version = _str(c.get("version"))
     original = c.get("purl")
     source, p = "purl", try_purl(original) if isinstance(original, str) else None
@@ -169,6 +220,19 @@ def _canonical_purl(c: dict[str, Any], keep_qualifiers: bool, fallback: str) -> 
             built = None
         if built is not None:
             return built.to_string(), "built"
+    found = _from_references(c, version)
+    if found is not None:
+        return PackageURL(type=found.type, namespace=found.namespace, name=found.name,
+                          version=found.version or version).to_string(), "from-url"
+    ptype = ECOSYSTEM_PURL_TYPE.get(doc_ecosystem or "")
+    group = _str(c.get("group"))
+    if ptype and version and (group or ptype not in _NEEDS_NAMESPACE):
+        try:
+            built = _build(ptype, _dashes(name), version, group)
+        except ValueError:
+            built = None
+        if built is not None:
+            return built.to_string(), "from-ecosystem"
     if fallback != "generic":
         return None, "none"
     return PackageURL(type="generic", namespace=_str(c.get("group")), name=_dashes(name), version=version).to_string(), "generic"
@@ -180,7 +244,8 @@ class PurlCanonical(CanonicalRule):
     title = "purl in the form Checkmarx matches"
     description = ("Every component got a purl of the form pkg:type/[namespace/]name@version: the type in lower case, "
                    "qualifiers and subpath removed (Checkmarx does not use them), the version filled from the component. "
-                   "A missing purl was built from the bom-ref or the ecosystem named by the generator, otherwise as "
+                   "A missing purl was built from the bom-ref, the component's registry URL, or the SBOM's one "
+                   "ecosystem (Erlang -> pkg:hex, .NET -> pkg:nuget, ...; not when the SBOM mixes ecosystems), otherwise as "
                    "pkg:generic/<name>@<version> (Checkmarx skips generic components but no purl is ever null). A purl never "
                    "holds a web URL (http/https): URLs are converted to the registry purl or dropped.")
     source_fix = "Let the generator write a plain purl (pkg:type/namespace/name@version) for every component."
@@ -188,9 +253,10 @@ class PurlCanonical(CanonicalRule):
     def run(self, doc: dict[str, Any], ctx: Ctx) -> None:
         policy = ctx.profile.canonical
         assert policy is not None
+        doc_eco = policy.ecosystem or document_ecosystem(doc)
         for i, c in enumerate(_components(doc)):
             old = c.get("purl")
-            new, how = canonical_purl(c, policy.keep_purl_qualifiers, policy.purl_fallback)
+            new, how = canonical_purl(c, policy.keep_purl_qualifiers, policy.purl_fallback, doc_eco)
             path = f"/components/{i}/purl"
             if new is None:
                 if old is not None:
@@ -204,6 +270,8 @@ class PurlCanonical(CanonicalRule):
                 "normalized": "purl reduced to type/namespace/name@version",
                 "from-bom-ref": "purl taken from the bom-ref",
                 "built": "purl built from the ecosystem named by the generator",
+                "from-url": "purl taken from the component's registry URL (externalReferences)",
+                "from-ecosystem": f"no purl; built for the SBOM's ecosystem ({doc_eco}: pkg:{ECOSYSTEM_PURL_TYPE.get(doc_eco or '')})",
                 "generic": "no ecosystem known; generic purl so the component has one (Checkmarx will not scan it)",
             }.get(how, how)
             ctx.log.add(self.id, path, "replaced" if old is not None else "added", old, new,
@@ -244,6 +312,8 @@ class LicensesCanonical(CanonicalRule):
     description = ("Licences were reduced to the SPDX id or name (or one expression); licence text, URLs and other "
                    "details were dropped. A component without a licence got NOASSERTION, because Checkmarx rejects "
                    "empty licence arrays.")
+    source_fix = ("Make the generator record the licence of every package (SPDX id such as MIT or Apache-2.0); "
+                  "packages without licence metadata need it added in the package manifest.")
 
     def run(self, doc: dict[str, Any], ctx: Ctx) -> None:
         policy = ctx.profile.canonical
@@ -275,6 +345,7 @@ class ComponentsCanonical(CanonicalRule):
                    "the other fields Checkmarx does not read were dropped; the original SBOM still has them. A missing "
                    "bom-ref (or one holding a web URL, renamed in dependencies too) was set to the purl (or the name), "
                    "a missing type to library.")
+    source_fix = "Give every component a bom-ref (cdxgen uses the purl) and a type; never a web URL as bom-ref."
 
     def run(self, doc: dict[str, Any], ctx: Ctx) -> None:
         policy = ctx.profile.canonical
@@ -342,7 +413,8 @@ class ComponentsCanonical(CanonicalRule):
                     d["dependsOn"] = [renames.get(t, t) if isinstance(t, str) else t for t in d["dependsOn"]]
 
     def _root_without_urls(self, root: dict[str, Any], ctx: Ctx, renames: dict[str, str]) -> None:
-        """metadata.component is kept as it is, except a purl or bom-ref that holds a web URL."""
+        """metadata.component keeps its fields; its purl gets the same form as the components' purls (no qualifiers, no
+        web URL) and a bom-ref holding a web URL is replaced."""
         policy = ctx.profile.canonical
         assert policy is not None
         old = root.get("purl")
@@ -354,6 +426,12 @@ class ComponentsCanonical(CanonicalRule):
                 root["purl"] = new
             ctx.log.add(self.id, "/metadata/component/purl", "replaced" if new else "removed", old, new, INFO,
                         "purl held a web URL")
+        elif isinstance(old, str):
+            new, how = canonical_purl(root, policy.keep_purl_qualifiers, policy.purl_fallback)
+            if new is not None and new != old and how == "normalized":
+                root["purl"] = new
+                ctx.log.add(self.id, "/metadata/component/purl", "replaced", old, new, INFO,
+                            "purl reduced to type/namespace/name@version")
         ref = root.get("bom-ref")
         if isinstance(ref, str) and has_url(ref):
             new_ref = root.get("purl") or _dashes(str(root.get("name") or "application"))
@@ -383,8 +461,26 @@ class MetadataCanonical(CanonicalRule):
     description = ("metadata was reduced to timestamp (kept; added when missing), tools (the tool list of the "
                    "profile, by default cyclonedx-dotnet in the 1.4 array form, which Checkmarx reads in every version; "
                    "with tool_per_ecosystem the name follows the detected ecosystem: cyclonedx-java, cyclonedx-node, ...) "
-                   "and the root component (kept as it was). Other metadata (authors, lifecycles, properties, ...) "
-                   "was dropped.")
+                   "and the root component (kept as it was; when missing it is added with the fields the schema "
+                   "requires left blank: type application, name \"\", and version \"\" for CycloneDX 1.2/1.3). Other "
+                   "metadata (authors, lifecycles, properties, ...) was dropped.")
+    source_fix = "Let the generator write metadata.component: the application the SBOM describes, with name and version."
+
+    def _root(self, root: Any, ctx: Ctx) -> dict[str, Any]:
+        """metadata.component is always written; missing required fields are left blank, never invented."""
+        required = {"type": "application", "name": ""}
+        if ctx.version in ("1.2", "1.3"):
+            required["version"] = ""
+        if not isinstance(root, dict):
+            ctx.log.add(self.id, "/metadata/component", "added", root, required, WARN,
+                        "No metadata.component; added with the required fields blank")
+            return dict(required)
+        for key, blank in required.items():
+            if not isinstance(root.get(key), str) or (key == "type" and not root[key]):
+                ctx.log.add(self.id, f"/metadata/component/{key}", "added" if key not in root else "replaced",
+                            root.get(key), blank, WARN, f"metadata.component has no {key}; set to {blank!r}")
+                root[key] = blank
+        return root
 
     def run(self, doc: dict[str, Any], ctx: Ctx) -> None:
         policy = ctx.profile.canonical
@@ -405,8 +501,7 @@ class MetadataCanonical(CanonicalRule):
                         INFO, why)
         elif policy.tool_per_ecosystem:
             ctx.log.note(self.id, "/metadata/tools", why, INFO)
-        if isinstance(old.get("component"), dict):
-            new["component"] = old["component"]
+        new["component"] = self._root(old.get("component"), ctx)
         dropped = sorted(k for k in old if k not in ("timestamp", "tools", "component"))
         if dropped:
             ctx.log.add(self.id, "/metadata", "removed", {k: old[k] for k in dropped}, None, WARN,
@@ -421,6 +516,8 @@ class DependenciesCanonical(CanonicalRule):
     description = ("dependencies entries were reduced to ref and dependsOn. An entry whose ref is not a component "
                    "(or the root component) was removed; dependsOn values that are not a component bom-ref, "
                    "self-references and duplicates were removed; entries with the same ref were merged.")
+    source_fix = ("List dependencies only between components that are in the SBOM, without self-dependencies and "
+                  "with one entry per ref.")
 
     def run(self, doc: dict[str, Any], ctx: Ctx) -> None:
         deps = doc.get("dependencies")
@@ -461,7 +558,8 @@ class TopLevelCanonical(CanonicalRule):
     description = ("Top-level sections Checkmarx does not read (services, compositions, vulnerabilities, "
                    "annotations, externalReferences, properties, formulation, declarations, definitions, signature, "
                    "$schema) were dropped. bomFormat and specVersion are kept as they were; serialNumber and version "
-                   "were added when missing.")
+                   "were added when missing; components is always present (an empty list when there are none).")
+    source_fix = "Let the generator write serialNumber (urn:uuid:...), version 1 and a components list."
 
     def run(self, doc: dict[str, Any], ctx: Ctx) -> None:
         if not (isinstance(doc.get("serialNumber"), str) and doc["serialNumber"]):
@@ -472,6 +570,10 @@ class TopLevelCanonical(CanonicalRule):
             ctx.log.add(self.id, "/version", "replaced" if "version" in doc else "added", doc.get("version"), 1, INFO,
                         "BOM version set to 1")
             doc["version"] = 1
+        if not isinstance(doc.get("components"), list):
+            ctx.log.add(self.id, "/components", "replaced" if "components" in doc else "added", doc.get("components"), [],
+                        INFO, "No components list; written as an empty list (the layout always has components)")
+            doc["components"] = []
         dropped = [k for k in doc if k not in TOP_LEVEL]
         for k in dropped:
             ctx.log.add(self.id, f"/{k}", "removed", doc[k], None, WARN, "top-level section not read by Checkmarx")

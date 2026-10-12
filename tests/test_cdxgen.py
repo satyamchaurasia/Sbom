@@ -201,27 +201,51 @@ def test_bare_component_array_is_read() -> None:
 
 
 def test_cli_ratecard_java(tmp_path: Path) -> None:
-    res = runner.invoke(app, ["cdxgen-fix", str(ROOT / "ratecard-sbom.json"), "--out", str(tmp_path), "--no-audit"])
+    res = runner.invoke(app, ["fix", str(ROOT / "ratecard-sbom.json"), "--out", str(tmp_path), "--no-audit"])
     assert res.exit_code == 1, res.output
     assert "cyclonedx-java" in res.output
-    out = json.loads((tmp_path / "Copilot_SBOM.json").read_text(encoding="utf-8"))
+    # exactly three files: the fixed SBOM, the tech notes and the suggestions
+    assert {p.name for p in tmp_path.iterdir()} == {"ratecard-sbom.corrected.cdx.json", "ratecard-sbom.tech-notes.md",
+                                                     "ratecard-sbom.suggestions.md"}
+    out = json.loads((tmp_path / "ratecard-sbom.corrected.cdx.json").read_text(encoding="utf-8"))
     assert tool_name(out) == "cyclonedx-java" and out["specVersion"] == "1.5"
+    assert list(out)[:4] == ["bomFormat", "specVersion", "serialNumber", "version"]
     assert validate(out, "cyclonedx", "1.5") == []
     assert all(set(c) <= {"bom-ref", "type", "name", "version", "purl", "licenses"} for c in out["components"])
-    assert {p.name for p in tmp_path.iterdir()} >= {"Copilot_SBOM.json", "ratecard-sbom.cdxgen.cdx.json",
-                                                     "ratecard-sbom.cdxgen.report.json",
-                                                     "ratecard-sbom.cdxgen.checkmarx.notes.txt"}
-    report = json.loads((tmp_path / "ratecard-sbom.cdxgen.report.json").read_text(encoding="utf-8"))
-    assert report["tools"].startswith("Tool cyclonedx-java")
-    again = runner.invoke(app, ["cdxgen-fix", str(tmp_path / "Copilot_SBOM.json"), "--out", str(tmp_path / "again"),
-                                "--no-audit"])
+    notes = (tmp_path / "ratecard-sbom.tech-notes.md").read_text(encoding="utf-8")
+    assert "## Summary" in notes and "Tool cyclonedx-java" in notes and "| CXN-040 |" in notes
+    advice = (tmp_path / "ratecard-sbom.suggestions.md").read_text(encoding="utf-8")
+    # qualifiers dropped for Checkmarx are not an issue of the original; missing licences are
+    assert "CXN-030" in advice and "CXN-020" not in advice and "Fix at the source" in advice
+    again = runner.invoke(app, ["fix", str(tmp_path / "ratecard-sbom.corrected.cdx.json"), "--out",
+                                str(tmp_path / "again"), "--no-audit", "--name", "out.json"])
     assert again.exit_code == 0, again.output
-    assert json.loads((tmp_path / "again" / "Copilot_SBOM.json").read_text(encoding="utf-8")) == out
+    assert json.loads((tmp_path / "again" / "out.json").read_text(encoding="utf-8")) == out
+    assert "No issues found" in next((tmp_path / "again").glob("*.suggestions.md")).read_text(encoding="utf-8")
+
+
+def test_cli_empty_components_kept(tmp_path: Path) -> None:
+    doc = {"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+           "metadata": {"component": {"type": "application", "name": "app", "version": "1.0"}}}
+    src = tmp_path / "empty.json"
+    src.write_text(json.dumps(doc), encoding="utf-8")
+    res = runner.invoke(app, ["fix", str(src), "--out", str(tmp_path / "o"), "--no-audit"])
+    assert res.exit_code == 7, res.output  # nothing Checkmarx can scan, but the file is written
+    out = json.loads((tmp_path / "o" / "empty.corrected.cdx.json").read_text(encoding="utf-8"))
+    assert out["components"] == [] and out["metadata"]["component"]["name"] == "app"
+    assert validate(out, "cyclonedx", "1.6") == []
+
+
+def test_cli_keep_converted(tmp_path: Path) -> None:
+    res = runner.invoke(app, ["fix", str(CORPUS / "minimal" / "min-cdx-1.6.json"), "--out", str(tmp_path),
+                              "--no-audit", "--keep-converted"])
+    assert res.exit_code in (0, 1), res.output
+    assert (tmp_path / "min-cdx-1.6.converted.cdx.json").exists()
 
 
 def test_cli_spdx_and_options(tmp_path: Path) -> None:
     src = CORPUS / "sbom-tool" / "service.spdx.json"
-    res = runner.invoke(app, ["cdxgen-fix", str(src), "--out", str(tmp_path), "--no-audit", "--ecosystem", "dotnet",
+    res = runner.invoke(app, ["fix", str(src), "--out", str(tmp_path), "--no-audit", "--ecosystem", "dotnet",
                               "--name", "x.json"])
     assert res.exit_code == 1, res.output
     out = json.loads((tmp_path / "x.json").read_text(encoding="utf-8"))
@@ -229,9 +253,9 @@ def test_cli_spdx_and_options(tmp_path: Path) -> None:
 
 
 def test_cli_errors(tmp_path: Path) -> None:
-    res = runner.invoke(app, ["cdxgen-fix", str(CORPUS / "unsupported" / "bom.xml"), "--out", str(tmp_path)])
+    res = runner.invoke(app, ["fix", str(CORPUS / "unsupported" / "bom.xml"), "--out", str(tmp_path)])
     assert res.exit_code == 2
-    res = runner.invoke(app, ["cdxgen-fix", str(ROOT / "ratecard-sbom.json"), "--out", str(tmp_path), "--ecosystem", "cobol"])
+    res = runner.invoke(app, ["fix", str(ROOT / "ratecard-sbom.json"), "--out", str(tmp_path), "--ecosystem", "cobol"])
     assert res.exit_code == 2 and "--ecosystem" in res.output
 
 
@@ -259,9 +283,9 @@ def test_cli_no_url_in_any_purl_or_bom_ref(tmp_path: Path) -> None:
                                     "purl": "https://www.npmjs.com/package/app/v/1.0.0"}
     src = tmp_path / "urls.cdx.json"
     src.write_text(json.dumps(doc), encoding="utf-8")
-    res = runner.invoke(app, ["cdxgen-fix", str(src), "--out", str(tmp_path / "o"), "--no-audit"])
+    res = runner.invoke(app, ["fix", str(src), "--out", str(tmp_path / "o"), "--no-audit"])
     assert res.exit_code == 1, res.output
-    out = json.loads((tmp_path / "o" / "Copilot_SBOM.json").read_text(encoding="utf-8"))
+    out = json.loads((tmp_path / "o" / "urls.corrected.cdx.json").read_text(encoding="utf-8"))
     purls = {c["name"]: c["purl"] for c in out["components"]}
     assert purls["lodash"] == "pkg:npm/lodash@4.17.21"
     assert purls["core"] == "pkg:npm/%40angular/core@15.0.0"
@@ -286,10 +310,87 @@ def test_spdx_url_locator_becomes_purl() -> None:
 
 
 def test_cli_reports_schema_validation_of_converted_file(tmp_path: Path) -> None:
-    res = runner.invoke(app, ["cdxgen-fix", str(CORPUS / "maven" / "orders-service.bom.json"), "--out", str(tmp_path),
+    res = runner.invoke(app, ["fix", str(CORPUS / "maven" / "orders-service.bom.json"), "--out", str(tmp_path),
                               "--no-audit"])
     assert res.exit_code == 1, res.output
-    assert "schema: 5 error(s) -> repaired in step 2" in res.output
-    assert "is schema-valid CycloneDX 1.5" in res.output
-    report = json.loads((tmp_path / "orders-service.cdxgen.report.json").read_text(encoding="utf-8"))
-    assert report["validation"]["converted_schema_errors"] == 5 and report["validation"]["final_schema_valid"]
+    assert "original   : 5 schema error(s)" in res.output
+    assert "schema: 5 error(s) -> repaired" in res.output
+    assert "schema-valid CycloneDX 1.5" in res.output
+    notes = (tmp_path / "orders-service.tech-notes.md").read_text(encoding="utf-8")
+    assert "CycloneDX 1.5 schema: 5 error(s)" in notes
+    advice = (tmp_path / "orders-service.suggestions.md").read_text(encoding="utf-8")
+    assert "5 schema error(s) in the original" in advice and "| How to fix |" in advice
+
+
+def test_tool_bookkeeping_and_layout_are_not_issues(tmp_path: Path) -> None:
+    res = runner.invoke(app, ["fix", str(CORPUS / "vendor" / "acme-portal.cdx.json"), "--out", str(tmp_path),
+                              "--no-audit"])
+    assert res.exit_code == 1, res.output
+    advice = (tmp_path / "acme-portal.suggestions.md").read_text(encoding="utf-8")
+    for rid in ("REP-007", "SAN-021", "PRUNE-001"):
+        assert f"### {rid}" in advice
+    for rid in ("SAN-090", "CXN-010", "CXN-040"):
+        assert f"### {rid}" not in advice
+    # the missing root component is an issue of the original; the tools / timestamp reshaping is not
+    assert "### CXN-011" in advice and "No metadata.component" in advice and "/metadata/tools" not in advice
+
+
+@pytest.mark.parametrize("version,blank", [("1.6", {"type": "application", "name": ""}),
+                                           ("1.3", {"type": "application", "name": "", "version": ""})])
+def test_root_component_always_written(version: str, blank: dict, tmp_path: Path) -> None:
+    doc = {"bomFormat": "CycloneDX", "specVersion": version, "version": 1,
+           "components": [{"type": "library", "name": "a", "version": "1", "purl": "pkg:npm/a@1"}]}
+    src = tmp_path / "noroot.json"
+    src.write_text(json.dumps(doc), encoding="utf-8")
+    res = runner.invoke(app, ["fix", str(src), "--out", str(tmp_path / "o"), "--no-audit"])
+    assert res.exit_code == 1, res.output
+    out = json.loads((tmp_path / "o" / "noroot.corrected.cdx.json").read_text(encoding="utf-8"))
+    assert out["metadata"]["component"] == blank
+    assert validate(out, "cyclonedx", version) == []
+    # a root without a name gets a blank name, the rest is kept
+    doc["metadata"] = {"component": {"type": "application", "version": "2.0"}}
+    src.write_text(json.dumps(doc), encoding="utf-8")
+    runner.invoke(app, ["fix", str(src), "--out", str(tmp_path / "p"), "--no-audit"])
+    out = json.loads((tmp_path / "p" / "noroot.corrected.cdx.json").read_text(encoding="utf-8"))
+    assert out["metadata"]["component"] == {"type": "application", "version": "2.0", "name": ""}
+
+
+ERLANG_COMPONENTS = [
+    {"type": "library", "bom-ref": "a", "name": "phoenix", "version": "1.7.0", "purl": "pkg:hex/phoenix@1.7.0"},
+    {"type": "library", "bom-ref": "b", "name": "cowboy", "version": "2.10.0"},
+    {"type": "library", "bom-ref": "c", "name": "plug", "version": "1.15.0",
+     "externalReferences": [{"type": "distribution", "url": "https://repo.hex.pm/tarballs/plug-1.15.0.tar"}]},
+]
+
+
+def test_erlang_components_without_purl_become_hex(tmp_path: Path) -> None:
+    doc = bom("1.5", components=ERLANG_COMPONENTS)
+    doc["metadata"]["tools"] = [{"name": "rebar3_sbom", "version": "0.7.0"}]
+    src = tmp_path / "erl.json"
+    src.write_text(json.dumps(doc), encoding="utf-8")
+    res = runner.invoke(app, ["fix", str(src), "--out", str(tmp_path / "o"), "--no-audit"])
+    out = json.loads((tmp_path / "o" / "erl.corrected.cdx.json").read_text(encoding="utf-8"))
+    assert {c["name"]: c["purl"] for c in out["components"]} == {
+        "phoenix": "pkg:hex/phoenix@1.7.0", "cowboy": "pkg:hex/cowboy@2.10.0", "plug": "pkg:hex/plug@1.15.0"}
+    assert tool_name(out) == "cyclonedx-erlang", res.output
+
+
+def test_generator_alone_names_the_ecosystem(tmp_path: Path) -> None:
+    doc = bom("1.5", components=[{"type": "library", "bom-ref": "b", "name": "cowboy", "version": "2.10.0"}])
+    doc["metadata"]["tools"] = [{"name": "mix_sbom", "version": "1"}]
+    src = tmp_path / "mix.json"
+    src.write_text(json.dumps(doc), encoding="utf-8")
+    runner.invoke(app, ["fix", str(src), "--out", str(tmp_path / "o"), "--no-audit"])
+    out = json.loads((tmp_path / "o" / "mix.corrected.cdx.json").read_text(encoding="utf-8"))
+    assert out["components"][0]["purl"] == "pkg:hex/cowboy@2.10.0"
+
+
+def test_mixed_ecosystems_do_not_guess(tmp_path: Path) -> None:
+    comps = [{"type": "library", "bom-ref": "a", "name": "phoenix", "version": "1.7.0", "purl": "pkg:hex/phoenix@1.7.0"},
+             {"type": "library", "bom-ref": "n", "name": "lodash", "version": "4.17.21", "purl": "pkg:npm/lodash@4.17.21"},
+             {"type": "library", "bom-ref": "b", "name": "cowboy", "version": "2.10.0"}]
+    src = tmp_path / "mixed.json"
+    src.write_text(json.dumps(bom("1.5", components=comps)), encoding="utf-8")
+    runner.invoke(app, ["fix", str(src), "--out", str(tmp_path / "o"), "--no-audit"])
+    out = json.loads((tmp_path / "o" / "mixed.corrected.cdx.json").read_text(encoding="utf-8"))
+    assert {c["name"]: c["purl"] for c in out["components"]}["cowboy"] == "pkg:generic/cowboy@2.10.0"

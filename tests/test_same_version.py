@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
-from typer.testing import CliRunner
 
-from sbom_fixer.cli import app
 from sbom_fixer.pipeline import run_fix
 from sbom_fixer.profile import load_profile
 from sbom_fixer.validate import validate
@@ -59,18 +56,6 @@ def test_allow_downgrade_restores_the_descent() -> None:
                    specs={**prof.specs, "cyclonedx": replace(prof.rules_for("cyclonedx"), accepted_versions=["1.5"])})
     out, res, _ = run(doc16(), prof)
     assert res.path == ["1.6", "1.5"] and out["specVersion"] == "1.5"
-
-
-def test_cli_fix_never_downgrades_and_flag_opts_in(tmp_path: Path) -> None:
-    src = tmp_path / "x.cdx.json"
-    src.write_text(json.dumps(doc16(modified="no")), encoding="utf-8")
-    runner = CliRunner()
-    res = runner.invoke(app, ["fix", str(src), "--out", str(tmp_path / "a"), "--accepted", "1.5", "--no-audit"])
-    assert res.exit_code == 1, res.output
-    assert json.loads((tmp_path / "a" / "x.checkmarx.cdx.json").read_text(encoding="utf-8"))["specVersion"] == "1.6"
-    res = runner.invoke(app, ["fix", str(src), "--out", str(tmp_path / "b"), "--accepted", "1.5", "--allow-downgrade", "--no-audit"])
-    assert res.exit_code == 1, res.output
-    assert json.loads((tmp_path / "b" / "x.checkmarx.cdx.json").read_text(encoding="utf-8"))["specVersion"] == "1.5"
 
 
 @pytest.mark.parametrize("rel", ["cdxgen/crypto.cdx.json", "cdxgen/analytics.cdxgen.json", "minimal/min-cdx-1.7.json",

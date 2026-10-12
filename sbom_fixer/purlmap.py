@@ -173,6 +173,13 @@ def _hex(segs: list[str], version: str | None) -> PackageURL | None:
     return PackageURL(type="hex", name=segs[1], version=segs[2] if len(segs) > 2 else version)
 
 
+def _hex_tarball(segs: list[str]) -> PackageURL | None:
+    if len(segs) != 2 or segs[0] != "tarballs" or not segs[1].endswith(".tar") or "-" not in segs[1]:
+        return None
+    name, version = segs[1][: -len(".tar")].rsplit("-", 1)
+    return PackageURL(type="hex", name=name, version=version)
+
+
 def _gem_web(segs: list[str], version: str | None) -> PackageURL | None:
     if len(segs) < 2 or segs[0] != "gems":
         return None
@@ -222,6 +229,7 @@ _HOSTS = {
     "rubygems.org": _gem,
     "proxy.golang.org": _golang,
     "pub.dev": _pub, "pub.dartlang.org": _pub,
+    "repo.hex.pm": _hex_tarball,
 }
 
 

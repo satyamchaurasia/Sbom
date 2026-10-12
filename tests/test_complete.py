@@ -210,25 +210,22 @@ def test_existing_license_choice_is_respected() -> None:
 # ------------------------------------------------------------------ CLI
 
 
-def test_cli_fill_required_and_all(tmp_path: Path) -> None:
+def test_cli_fill_all(tmp_path: Path) -> None:
     src = tmp_path / "svc.cdx.json"
     src.write_text(json.dumps(broken_cdx()), encoding="utf-8")
     runner = CliRunner()
-    res = runner.invoke(app, ["fill-required", str(src), "--out", str(tmp_path / "o")])
-    assert res.exit_code == 0, res.output
-    out = json.loads((tmp_path / "o" / "svc.fill-required.cdx.json").read_text(encoding="utf-8"))
-    report = json.loads((tmp_path / "o" / "svc.fill-required.cdx.report.json").read_text(encoding="utf-8"))
-    assert out["components"][0]["name"] == "slf4j-api" and report["schema_errors_after"] == 0
     res = runner.invoke(app, ["fill-all", str(src), "--out", str(tmp_path / "o")])
     assert res.exit_code == 0, res.output
     out = json.loads((tmp_path / "o" / "svc.fill-all.cdx.json").read_text(encoding="utf-8"))
+    report = json.loads((tmp_path / "o" / "svc.fill-all.cdx.report.json").read_text(encoding="utf-8"))
+    assert out["components"][0]["name"] == "slf4j-api" and report["schema_errors_after"] == 0
     assert PLACEHOLDER in json.dumps(out) and "metadata" in out
 
 
 def test_cli_fill_brings_18_down_to_17(tmp_path: Path) -> None:
-    res = CliRunner().invoke(app, ["fill-required", str(CORPUS / "future" / "min-cdx-1.8.json"), "--out", str(tmp_path)])
+    res = CliRunner().invoke(app, ["fill-all", str(CORPUS / "future" / "min-cdx-1.8.json"), "--out", str(tmp_path)])
     assert res.exit_code == 0 and "brought down to 1.7" in res.output
-    out = json.loads((tmp_path / "min-cdx-1.8.fill-required.cdx.json").read_text(encoding="utf-8"))
+    out = json.loads((tmp_path / "min-cdx-1.8.fill-all.cdx.json").read_text(encoding="utf-8"))
     assert out["specVersion"] == "1.7" and validate(out, "cyclonedx", "1.7") == []
 
 
@@ -243,7 +240,7 @@ def test_cli_fill_brings_18_down_to_17(tmp_path: Path) -> None:
 def test_cli_fill_accepts_any_json(payload: Any, args: list[str], spec: str, version: str, note: str, tmp_path: Path) -> None:
     src = tmp_path / "in.json"
     src.write_text(json.dumps(payload), encoding="utf-8")
-    for command in ("fill-required", "fill-all"):
+    for command in ("fill-all",):
         res = CliRunner().invoke(app, [command, str(src), "--out", str(tmp_path / "o"), *args])
         assert res.exit_code == 0, res.output
         assert note in res.output
@@ -256,7 +253,7 @@ def test_cli_fill_accepts_any_json(payload: Any, args: list[str], spec: str, ver
 def test_cli_fill_rejects_non_json(tmp_path: Path) -> None:
     src = tmp_path / "x.json"
     src.write_text("{not json", encoding="utf-8")
-    res = CliRunner().invoke(app, ["fill-required", str(src), "--out", str(tmp_path)])
+    res = CliRunner().invoke(app, ["fill-all", str(src), "--out", str(tmp_path)])
     assert res.exit_code == 2 and "not valid JSON" in res.output
 
 
@@ -305,15 +302,15 @@ def test_progress_lines_when_forced(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     monkeypatch.setenv("SBOM_FIXER_PROGRESS", "1")
     src = tmp_path / "svc.cdx.json"
     src.write_text(json.dumps(broken_cdx()), encoding="utf-8")
-    res = CliRunner().invoke(app, ["fill-required", str(src), "--out", str(tmp_path / "o")])
+    res = CliRunner().invoke(app, ["fill-all", str(src), "--out", str(tmp_path / "o")])
     assert res.exit_code == 0 and "reading" in res.output and "done" in res.output
-    res = CliRunner().invoke(app, ["fix", str(CORPUS / "minimal" / "min-cdx-1.6.json"), "--out", str(tmp_path / "f"), "--no-audit",
-                                    "--no-canonical"])
-    assert res.exit_code == 0 and "version path 1.6" in res.output and "done, exit code 0" in res.output
+    res = CliRunner().invoke(app, ["fix", str(CORPUS / "minimal" / "min-cdx-1.6.json"), "--out", str(tmp_path / "f"),
+                                    "--no-audit"])
+    assert res.exit_code == 1 and "version path 1.6" in res.output and "done, exit code 1" in res.output
 
 
 def test_no_progress_for_small_files_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("SBOM_FIXER_PROGRESS", raising=False)
-    res = CliRunner().invoke(app, ["fix", str(CORPUS / "minimal" / "min-cdx-1.6.json"), "--out", str(tmp_path), "--no-audit",
-                                    "--no-canonical"])
-    assert res.exit_code == 0 and "version path" not in res.output
+    res = CliRunner().invoke(app, ["fix", str(CORPUS / "minimal" / "min-cdx-1.6.json"), "--out", str(tmp_path),
+                                    "--no-audit"])
+    assert res.exit_code == 1 and "version path" not in res.output
