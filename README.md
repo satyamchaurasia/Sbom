@@ -132,7 +132,7 @@ Outputs in `--out`, three files only:
 |---|---|
 | `<name>.corrected.cdx.json` (`--name`) | the fixed SBOM to upload |
 | `<name>.tech-notes.md` | summary (input, output, tool, change counts, exit code), the three steps, every change grouped by rule as *fix* (a problem of the input) or *layout* (reshaped for Checkmarx), findings |
-| `<name>.suggestions.md` | issues of the original to fix at the generator: its own schema errors (with how to fix), every data problem sbom-fixer repaired (count, examples, fix at the source), generator and pipeline hints |
+| `<name>.suggestions.md` | one short table of what is missing or wrong in the original: problem, count, which components, how to fix it at the generator (schema errors first, each problem once) |
 
 No change log, diff, notes or report JSON is written. Exit codes: see below.
 

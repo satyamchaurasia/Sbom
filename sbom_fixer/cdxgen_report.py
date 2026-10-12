@@ -4,7 +4,7 @@ original SBOM, to fix at the generator)."""
 from __future__ import annotations
 
 import json
-from collections import Counter
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -194,45 +194,105 @@ def tech_notes(result: RunResult, conv: Conversion, original: OriginalCheck, sbo
     return "\n".join(L) + "\n"
 
 
+# reason of a change (start of the text) -> (what is missing or wrong, how to fix it at the source)
+_SHORT: list[tuple[str, str, str]] = [
+    ("No licence", "No licence", "Add the licence (SPDX id, e.g. MIT, Apache-2.0) to the package manifest (pom, csproj, "
+                                 "package.json); for own libraries set it in the build."),
+    ("no purl; built for the SBOM", "No purl", "Use a generator that writes a purl for every package."),
+    ("no ecosystem known", "No purl and no ecosystem (written as pkg:generic, Checkmarx skips it)",
+     "Use a generator that writes a purl for every package."),
+    ("purl taken from the package-cache path", 'DLL/JAR without a package purl (found in the package cache)',
+     'Generate the SBOM from the project (dotnet CycloneDX, CycloneDX Maven/Gradle plugin), not from binaries.'),
+    ("version set to the package version from the cache path", 'DLL/JAR without a package purl (found in the package cache)',
+     'Generate the SBOM from the project (dotnet CycloneDX, CycloneDX Maven/Gradle plugin), not from binaries.'),
+    ("purl built from verified component data", "No purl", 'Use a generator that writes a purl for every package.'),
+    ("serialNumber identifies", "No serialNumber", "Let the generator write serialNumber (urn:uuid:...)."),
+    ("No tool named", "No tool in metadata.tools",
+     "Let the generator record itself in metadata.tools (CycloneDX) or creationInfo.creators (SPDX)."),
+    ("does not exist", "Dependency on a component that is not in the SBOM",
+     "List dependencies only between components that are in the SBOM."),
+    ("is not an SPDX license ID", "Licence name instead of the SPDX id", "Use SPDX licence ids (Apache-2.0, MIT, ...)."),
+    ("license was written as a plain string", "Licence written as plain text", "Write licences as {\"license\": {\"id\": \"MIT\"}}."),
+    ("No timezone given", "Timestamp without timezone", "Write timestamps with a timezone, e.g. 2026-10-12T10:00:00Z."),
+    ("purl taken from the component's registry URL", "No purl (only a registry URL)",
+     "Let the generator write the purl, not only the download URL."),
+    ("purl taken from the bom-ref", "No purl (only in bom-ref)", "Write the purl in the purl field too."),
+    ("purl built from the ecosystem named by the generator", "No purl", "Use a generator that writes a purl for every package."),
+    ("No metadata.component", "No root component (metadata.component)",
+     "Let the generator write the application itself as metadata.component (name, version)."),
+    ("metadata.component has no", "Root component without name/type/version",
+     "Set name and version of the application in the generator / build."),
+    ("Version is required at this spec version and is unknown", "Component without version",
+     "Write the resolved version of every package."),
+    ("No serialNumber", "No serialNumber", "Let the generator write serialNumber (urn:uuid:...)."),
+    ("serialNumber must match", "serialNumber is not urn:uuid:...", "Write serialNumber as urn:uuid:<uuid>."),
+    ("No timestamp", "No timestamp", "Let the generator write metadata.timestamp."),
+    ("BOM version", "No BOM version", "Write version: 1."),
+    ("ref is not a component", "Dependency for a component that is not in the SBOM",
+     "List dependencies only for components that are in the SBOM."),
+    ("dependsOn points at a component that does not exist", "Dependency on a component that is not in the SBOM",
+     "List dependencies only between components that are in the SBOM."),
+    ("self-dependency", "Component depends on itself", "Remove self-dependencies in the generator output."),
+    ("bom-ref must be unique", "Same bom-ref used twice", "Give every component a unique bom-ref."),
+    ("Duplicate component", "Same package listed twice", "List each package once."),
+    ("Value was null or empty", "null or empty values", "Leave a field out instead of writing null or \"\"."),
+    ("Field is not allowed by the schema", "Fields that are not in the schema", "Remove custom fields (or put them in properties)."),
+]
+
+
+def _short_issue(change: Change) -> tuple[str, str]:
+    for start, issue, fix in _SHORT:
+        if change.reason.startswith(start) or start in change.reason:
+            return issue, fix
+    return change.reason.rstrip("."), source_fix(change.rule_id) or "-"
+
+
+def _which(change: Change, doc: dict[str, Any] | None) -> str | None:
+    """name@version of the component a change belongs to, from the corrected document."""
+    if change.path.startswith("/metadata/component"):
+        return "root component"
+    m = re.match(r"^/components/(\d+)", change.path)
+    comps = doc.get("components") if isinstance(doc, dict) else None
+    if not m or not isinstance(comps, list) or int(m.group(1)) >= len(comps):
+        return None
+    c = comps[int(m.group(1))]
+    if not isinstance(c, dict) or not c.get("name"):
+        return None
+    return f"{c['name']}@{c['version']}" if c.get("version") else str(c["name"])
+
+
+# rules that only repair schema errors: their problem is already a "Schema error" row
+_SCHEMA_REPAIRS = ("REP-", "PRUNE-", "COERCE-", "CDX-VER", "SPDX-VER")
+
+
 def suggestions(result: RunResult, original: OriginalCheck) -> str:
-    issues = [c for c in result.log.changes if is_issue(c)]
-    by_rule = _by_rule(issues)
-    if original.issues or issues:
-        headline = (f"**{len(original.issues):,} schema error(s) in the original and {len(issues):,} value(s) "
-                    f"sbom-fixer had to repair ({len(by_rule)} kind(s)).**")
-    else:
-        headline = "**No issues found in the original.**"
-    L: list[str] = [f"# Suggestions: fix these in {original.name}", "",
-                    "sbom-fixer worked around the issues below in the output. Fix them in the generator or the build "
-                    "so the original SBOM is correct on its own.", "", headline, ""]
-
-    L += [f"## 1. Schema errors in the original ({original.spec} {original.version})", ""]
+    """Short list: what is missing or wrong in the original, how many, which components, how to fix it."""
+    doc = result.fixed_doc if result.ok else None
+    rows: dict[tuple[str, str], list[str | None]] = {}
+    for c in result.log.changes:
+        if is_issue(c) and not (original.issues and c.rule_id.startswith(_SCHEMA_REPAIRS)):
+            rows.setdefault(_short_issue(c), []).append(_which(c, doc))
+    L: list[str] = [f"# Suggestions: {original.name}", ""]
     if original.error:
-        L += [f"The original could not be validated as it is: {original.error}", ""]
-    elif not original.issues:
-        L += ["None: the original is valid against its own schema.", ""]
-    else:
-        L += ["| Count | Keyword | Where | Example | How to fix |", "|---:|---|---|---|---|"]
-        for kw, pth, cnt, msg in group(original.issues)[:40]:
-            hint = _SCHEMA_HINTS.get(kw, "Check the field against the schema.")
-            L.append(f"| {cnt:,} | {kw} | {_code(pth)} | {_short(msg, 80)} | {hint} |")
-        L.append("")
-
-    L += ["## 2. Data problems sbom-fixer had to repair", ""]
-    if not by_rule:
-        L += ["None.", ""]
-    for rid, items in by_rule:
-        fix = source_fix(rid)
-        L += [f"### {rid}: {_title(rid)} ({len(items):,})", ""]
-        for reason, cnt in Counter(c.reason for c in items).most_common(5):
-            L.append(f"- {cnt:,} x {reason}")
-        L.append("- Examples: " + "; ".join(_example(c) for c in items[:3]))
-        if fix:
-            L.append(f"- **Fix at the source:** {fix}")
-        L.append("")
-
-    L += ["## 3. Generator and pipeline", ""]
-    L += [f"- {h}" for h in _generator_hints(result, original)] or ["- Nothing else."]
+        L += [f"Not checked against a schema: {original.error}", ""]
+    if not rows and not original.issues and not original.error:
+        return "\n".join(L + ["No issues found. Nothing to fix.", ""])
+    L += ["| # | Missing / wrong | Count | Components | Fix |", "|---:|---|---:|---|---|"]
+    n = 0
+    for kw, pth, cnt, msg in group(original.issues):
+        n += 1
+        hint = _SCHEMA_HINTS.get(kw, "Check the field against the schema.")
+        L.append(f"| {n} | Schema error at {_code(pth)}: {_short(msg, 70)} | {cnt:,} | - | {hint} |")
+    for (issue, fix), names in sorted(rows.items(), key=lambda kv: -len(kv[1])):
+        n += 1
+        known = sorted({x for x in names if x})
+        count = len(known) if known and None not in names else len(names)
+        shown = ", ".join(_short(x, 40) for x in known[:5]) + (f" +{len(known) - 5} more" if len(known) > 5 else "")
+        L.append(f"| {n} | {_short(issue, 90)} | {count:,} | {shown or '-'} | {_short(fix, 160)} |")
+    fixes = {fix for _, fix in rows}
+    for hint in (h for h in _generator_hints(result, original) if h not in fixes):
+        n += 1
+        L.append(f"| {n} | Pipeline | - | - | {hint} |")
     return "\n".join(L) + "\n"
 
 

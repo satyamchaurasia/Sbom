@@ -215,8 +215,11 @@ def test_cli_ratecard_java(tmp_path: Path) -> None:
     notes = (tmp_path / "ratecard-sbom.tech-notes.md").read_text(encoding="utf-8")
     assert "## Summary" in notes and "Tool cyclonedx-java" in notes and "| CXN-040 |" in notes
     advice = (tmp_path / "ratecard-sbom.suggestions.md").read_text(encoding="utf-8")
-    # qualifiers dropped for Checkmarx are not an issue of the original; missing licences are
-    assert "CXN-030" in advice and "CXN-020" not in advice and "Fix at the source" in advice
+    # one short row per problem: what is missing, how many, which components, how to fix it
+    assert "| # | Missing / wrong | Count | Components | Fix |" in advice
+    assert "| No licence | 13 | antlr-runtime@3.4" in advice
+    # qualifiers dropped for Checkmarx are not an issue of the original
+    assert "purl" not in advice and len(advice.splitlines()) == 5
     again = runner.invoke(app, ["fix", str(tmp_path / "ratecard-sbom.corrected.cdx.json"), "--out",
                                 str(tmp_path / "again"), "--no-audit", "--name", "out.json"])
     assert again.exit_code == 0, again.output
@@ -319,7 +322,7 @@ def test_cli_reports_schema_validation_of_converted_file(tmp_path: Path) -> None
     notes = (tmp_path / "orders-service.tech-notes.md").read_text(encoding="utf-8")
     assert "CycloneDX 1.5 schema: 5 error(s)" in notes
     advice = (tmp_path / "orders-service.suggestions.md").read_text(encoding="utf-8")
-    assert "5 schema error(s) in the original" in advice and "| How to fix |" in advice
+    assert sum(row.count("| Schema error at ") for row in advice.splitlines()) >= 3  # 5 errors, grouped by cause
 
 
 def test_tool_bookkeeping_and_layout_are_not_issues(tmp_path: Path) -> None:
@@ -327,12 +330,13 @@ def test_tool_bookkeeping_and_layout_are_not_issues(tmp_path: Path) -> None:
                               "--no-audit"])
     assert res.exit_code == 1, res.output
     advice = (tmp_path / "acme-portal.suggestions.md").read_text(encoding="utf-8")
-    for rid in ("REP-007", "SAN-021", "PRUNE-001"):
-        assert f"### {rid}" in advice
-    for rid in ("SAN-090", "CXN-010", "CXN-040"):
-        assert f"### {rid}" not in advice
-    # the missing root component is an issue of the original; the tools / timestamp reshaping is not
-    assert "### CXN-011" in advice and "No metadata.component" in advice and "/metadata/tools" not in advice
+    # the schema errors (serialNumber, unknown field, null) and the data problems of the original
+    assert "Schema error at `/serialNumber`" in advice
+    assert "| Dependency on a component that is not in the SBOM |" in advice
+    assert "| No root component (metadata.component) |" in advice
+    # repairs of those schema errors are not listed twice; layout trims and sbom-fixer's bookkeeping are not issues
+    for text in ("serialNumber is not urn:uuid", "provenance", "metadata.tools", "not read by Checkmarx", "REP-", "CXN-"):
+        assert text not in advice, text
 
 
 @pytest.mark.parametrize("version,blank", [("1.6", {"type": "application", "name": ""}),

@@ -364,14 +364,17 @@ For an input `sbom.json`, `fix` writes exactly three files:
 | Changes by rule | One row per rule: what it does, kind, count and an example. Kind **fix** = a problem of the input that was repaired; **layout** = reshaped for Checkmarx (data Checkmarx does not read is dropped from this copy only) |
 | Not changed (findings) | Things the tool noticed but did not change |
 
-**Suggestions** sections:
+**Suggestions** is one short table, one row per problem of the original:
 
-| Section | What it tells you |
-|---|---|
-| Headline | Number of schema errors in the original and of values sbom-fixer had to repair |
-| 1. Schema errors in the original | Errors of the original against its own schema, grouped, each with "How to fix" |
-| 2. Data problems sbom-fixer had to repair | One block per rule: how often, why, examples and **Fix at the source** |
-| 3. Generator and pipeline | Pipeline hints, for example set `metadata.authors` or use the generator's own output option |
+| # | Missing / wrong | Count | Components | Fix |
+|---:|---|---:|---|---|
+| 1 | No licence | 13 | antlr-runtime@3.4, aos-common-models@SB3-0.0.1, api-commons@SB3-0.0.1, ... +8 more | Add the licence (SPDX id, e.g. MIT, Apache-2.0) to the package manifest (pom, csproj, package.json); for own libraries set it in the build. |
+| 2 | Schema error at `/serialNumber`: 'ACME-0001' does not match '^urn:uuid:...' | 1 | - | Write the value in the expected pattern (for example urn:uuid:... for serialNumber). |
+| 3 | No root component (metadata.component) | 1 | root component | Let the generator write the application itself as metadata.component (name, version). |
+
+Schema errors of the original come first (grouped by cause), then the data problems, then pipeline hints. A problem
+is listed once: the repair of a schema error is not listed again. With nothing to fix the file says
+"No issues found. Nothing to fix."
 
 Layout changes (dropped hashes, properties, qualifiers, the reshaped `metadata.tools`) are not listed in the suggestions: they are not mistakes of the original.
 

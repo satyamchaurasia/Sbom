@@ -83,7 +83,8 @@ def test_dll_components_get_the_package_purl_and_version(tmp_path: Path) -> None
     # no cache path: the file name is never turned into pkg:nuget/MyCompany.Core.dll
     assert got["MyCompany.Core.dll"] == ("1.0.0.0", "pkg:generic/MyCompany.Core.dll@1.0.0.0")
     assert got["Polly"] == ("8.2.0", "pkg:nuget/Polly@8.2.0")
-    assert "package-cache path" in (folder / "app.suggestions.md").read_text(encoding="utf-8")
+    advice = (folder / "app.suggestions.md").read_text(encoding="utf-8")
+    assert "| DLL/JAR without a package purl (found in the package cache) | 2 | Newtonsoft.Json.dll@13.0.3, Serilog.dll@3.1.1 |" in advice
 
 
 # ---------------------------------------------------------------- a second run changes nothing
