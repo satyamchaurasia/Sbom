@@ -238,12 +238,18 @@ Only needed for `verify`, `bisect`, `--verify` and `--verify-each-step`. The `cx
 
 ```bash
 python tools/make_corpus.py          # regenerate corpus/ and corpus/expected.yaml
-.venv/Scripts/pytest                 # 328 tests, about 40 seconds
+.venv/Scripts/pytest                 # the whole suite, about a minute
 .venv/Scripts/ruff check sbom_fixer tests tools
 .venv/Scripts/mypy sbom_fixer
 python tools/vendor_schemas.py       # only when upgrading schemas; commit with schemas/SOURCES.md
 python tools/vendor_sbomqs.py 2.1.2  # only when upgrading sbomqs; also set ARG SBOMQS_VERSION in the Dockerfile
+python tools/make_rule_catalog.py    # docs/rule-catalog.md and the rule table of the Rule Book, from the code
+python tools/make_rule_book_docx.py  # Rule Book .docx from docs/SBOM_Fixer_Rule_Book.md (needs: pip install python-docx)
 ```
+
+The user manual is `docs/SBOM_Fixer_Rule_Book.md`; the Word copies (`docs/SBOM_Fixer_Rule_Book.docx`,
+`SBOM_Fixer_Rule_Book_And_Installation_guide.docx`) are generated from it. Edit the Markdown, then run the two scripts
+above.
 
 Adding a rule follows the seven-step recipe in the Implementation Plan (evidence, classify, fixture, implement, describe, run everything, catalog).
 
