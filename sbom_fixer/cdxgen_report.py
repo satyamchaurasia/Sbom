@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .audit.ntia import COMPONENT_FIELDS, DOC_FIELDS, NtiaReport, ntia_check
 from .changes import Change
 from .rules import rule_by_id
 from .rules.canonical import is_reduction
@@ -89,6 +90,8 @@ class OriginalCheck:
     issues: list[Issue] = field(default_factory=list)
     error: str | None = None
     components: int = 0
+    ntia: NtiaReport | None = None  # NTIA minimum elements of the original
+    labels: dict[str, str] = field(default_factory=dict)  # bom-ref / SPDXID -> name@version
 
 
 def _code(text: str) -> str:
@@ -151,11 +154,19 @@ def tech_notes(result: RunResult, conv: Conversion, original: OriginalCheck, sbo
     L.append(f"- **Original schema errors:** not validated as it is ({original.error})" if original.error
              else f"- **Original schema errors:** {len(original.issues):,} (details in the suggestions file)")
     L.append(f"- **Exit code:** {result.exit_code} ({_EXIT_TEXT.get(result.exit_code, 'see README')})")
-    if result.quality is not None:
-        q = result.quality
-        L.append(f"- **NTIA minimum elements after the fix:** {'PASS' if q.after_ntia.passed else 'FAIL'}"
-                 + (f", sbomqs {q.after_score:.1f}" if q.after_score is not None else ""))
+    corrected_ntia = corrected_ntia_of(result)
+    if original.ntia is not None:
+        L.append(f"- **NTIA minimum elements (original):** {ntia_summary(original.ntia)}")
+    if corrected_ntia is not None:
+        L.append(f"- **NTIA minimum elements (corrected):** {ntia_summary(corrected_ntia)}"
+                 + (f", sbomqs {result.quality.after_score:.1f}"
+                    if result.quality is not None and result.quality.after_score is not None else ""))
     L.append("")
+    if original.ntia is not None or corrected_ntia is not None:
+        L += ["## NTIA minimum elements", ""] + _ntia_table(original.ntia, corrected_ntia)
+        L += ["", "The corrected file keeps only what Checkmarx reads (no supplier, no author), so its NTIA result is "
+                  "usually FAIL. Use the original for NTIA; fix the gaps of the original at the source "
+                  "(suggestions file).", ""]
 
     L += ["## What was done", "",
           f"1. **Converted** ({conv.source_spec} {conv.source_version} -> CycloneDX "
@@ -240,6 +251,57 @@ _SHORT: list[tuple[str, str, str]] = [
 ]
 
 
+_NTIA_ROWS = {
+    "Supplier name": ("No supplier (NTIA)",
+                      "Let the generator write the supplier of every package (from the package metadata: the organization element "
+                      "of the pom, authors in the nuspec or package.json); for own libraries set your company."),
+    "Component name": ("No component name (NTIA)", "Write the name of every package."),
+    "Component version": ("No component version (NTIA)", "Write the resolved version of every package."),
+    "Unique identifier": ("No unique identifier: purl, CPE or SWID (NTIA)",
+                          "Use a generator that writes a purl for every package."),
+    "Dependency relationships": ("No dependency relationships (NTIA)",
+                                 "Let the generator write the dependency graph (CycloneDX dependencies, SPDX DEPENDS_ON)."),
+    "Author of SBOM data": ("No SBOM author (NTIA)", "Set metadata.authors (CycloneDX) or a Person/Organization creator "
+                                                     "(SPDX) to the team that produced the SBOM."),
+    "Timestamp": ("No timestamp (NTIA)", "Let the generator write metadata.timestamp (SPDX: creationInfo.created)."),
+}
+
+
+def _ntia_label(label: str) -> str:
+    """name@version for a purl label (pkg:maven/g/a@1?type=jar -> a@1); other labels as they are."""
+    from .purlmap import try_purl
+
+    p = try_purl(label) if label.startswith("pkg:") else None
+    return f"{p.name}@{p.version}" if p is not None and p.version else (p.name if p is not None else label)
+
+
+def ntia_summary(report: NtiaReport) -> str:
+    """One line: PASS, or FAIL with what is missing (supplier 72/320, author missing)."""
+    if report.passed:
+        return "PASS"
+    gaps = [f"{name.split()[0].lower()} {cov.covered}/{cov.total}" for name, cov in report.components.items()
+            if not cov.complete]
+    gaps += [f"{name.split()[0].lower()} missing" if name != "Author of SBOM data" else "author missing"
+             for name, ok in report.document.items() if not ok]
+    return "FAIL - " + ", ".join(gaps)
+
+
+def _ntia_table(original: NtiaReport | None, corrected: NtiaReport | None) -> list[str]:
+    def cell(report: NtiaReport | None, name: str) -> str:
+        if report is None:
+            return "-"
+        if name in report.components:
+            cov = report.components[name]
+            return f"{cov.covered:,} / {cov.total:,}" + ("" if cov.complete else " ✗")
+        return "yes" if report.document.get(name) else "no ✗"
+
+    rows = ["| NTIA element | Original | Corrected |", "|---|---|---|"]
+    rows += [f"| {name} | {cell(original, name)} | {cell(corrected, name)} |" for name in COMPONENT_FIELDS + DOC_FIELDS]
+    verdict = [("PASS" if r.passed else "FAIL") if r is not None else "-" for r in (original, corrected)]
+    rows.append(f"| **Result** | **{verdict[0]}** | **{verdict[1]}** |")
+    return rows
+
+
 def _short_issue(change: Change) -> tuple[str, str]:
     for start, issue, fix in _SHORT:
         if change.reason.startswith(start) or start in change.reason:
@@ -275,7 +337,7 @@ def suggestions(result: RunResult, original: OriginalCheck) -> str:
     L: list[str] = [f"# Suggestions: {original.name}", ""]
     if original.error:
         L += [f"Not checked against a schema: {original.error}", ""]
-    if not rows and not original.issues and not original.error:
+    if not rows and not original.issues and not original.error and (original.ntia is None or original.ntia.passed):
         return "\n".join(L + ["No issues found. Nothing to fix.", ""])
     L += ["| # | Missing / wrong | Count | Components | Fix |", "|---:|---|---:|---|---|"]
     n = 0
@@ -289,6 +351,23 @@ def suggestions(result: RunResult, original: OriginalCheck) -> str:
         count = len(known) if known and None not in names else len(names)
         shown = ", ".join(_short(x, 40) for x in known[:5]) + (f" +{len(known) - 5} more" if len(known) > 5 else "")
         L.append(f"| {n} | {_short(issue, 90)} | {count:,} | {shown or '-'} | {_short(fix, 160)} |")
+    if original.ntia is not None:
+        for name in COMPONENT_FIELDS:
+            cov = original.ntia.components.get(name)
+            if cov is None or cov.complete:
+                continue
+            issue, fix = _NTIA_ROWS[name]
+            shown = ", ".join(_short(original.labels.get(x) or _ntia_label(x), 40) for x in cov.missing_examples[:5])
+            more = cov.missing - min(len(cov.missing_examples), 5)
+            n += 1
+            L.append(f"| {n} | {issue} | {cov.missing:,} of {cov.total:,} | {shown}{f' +{more} more' if more > 0 else ''} "
+                     f"| {_short(fix, 200)} |")
+        for name in DOC_FIELDS:
+            if original.ntia.document.get(name, True):
+                continue
+            issue, fix = _NTIA_ROWS[name]
+            n += 1
+            L.append(f"| {n} | {issue} | - | - | {_short(fix, 200)} |")
     fixes = {fix for _, fix in rows}
     for hint in (h for h in _generator_hints(result, original) if h not in fixes):
         n += 1
@@ -305,9 +384,29 @@ def _generator_hints(result: RunResult, original: OriginalCheck) -> list[str]:
         out.append("Checkmarx reads CycloneDX best: if the generator can write CycloneDX JSON, use that instead of SPDX.")
     if not original.generator:
         out.append("Let the generator record itself in metadata.tools (CycloneDX) or creationInfo.creators (SPDX).")
-    if result.quality is not None and not result.quality.after_ntia.document.get("Author of SBOM data"):
-        out.append("Set metadata.authors (the team that produced the SBOM); NTIA requires an author.")
     return out
+
+
+def _labels(doc: dict[str, Any], spec: str) -> dict[str, str]:
+    """The NTIA check names components by bom-ref (SPDX: SPDXID); the suggestions show name@version."""
+    from .jsonutil import iter_components
+
+    out: dict[str, str] = {}
+    if spec == "spdx":
+        items = [(p.get("SPDXID"), p.get("name"), p.get("versionInfo")) for p in doc.get("packages") or []
+                 if isinstance(p, dict)]
+    else:
+        items = [(c.get("bom-ref"), c.get("name"), c.get("version")) for _, c in iter_components(doc)]
+    for key, name, version in items:
+        if isinstance(key, str) and isinstance(name, str) and name:
+            out[key] = f"{name}@{version}" if isinstance(version, str) and version else name
+    return out
+
+
+def corrected_ntia_of(result: RunResult) -> NtiaReport | None:
+    if result.quality is not None:
+        return result.quality.after_ntia
+    return ntia_check(result.fixed_doc, "cyclonedx") if result.ok and isinstance(result.fixed_doc, dict) else None
 
 
 def check_original(raw: bytes, name: str) -> OriginalCheck:
@@ -326,6 +425,9 @@ def check_original(raw: bytes, name: str) -> OriginalCheck:
     out.spec, out.version, out.generator = det.spec, det.version, det.generator
     items = doc.get("packages" if det.spec == "spdx" else "components") if isinstance(doc, dict) else None
     out.components = len(items) if isinstance(items, list) else 0
+    if isinstance(doc, dict):
+        out.ntia = ntia_check(doc, det.spec)
+        out.labels = _labels(doc, det.spec)
     if det.version in VERSION_ORDER[det.spec]:
         out.issues = validate(doc, det.spec, det.version)
     else:

@@ -51,7 +51,7 @@ def fix(
     import tempfile
 
     from .cdxgen import to_cdxgen
-    from .cdxgen_report import check_original, suggestions, tech_notes
+    from .cdxgen_report import check_original, ntia_summary, suggestions, tech_notes
     from .errors import DetectError
     from .pipeline import output_stem
     from .profile import CanonicalPolicy
@@ -97,6 +97,8 @@ def fix(
         typer.echo(f"  converted  : {converted}")
     typer.echo(f"  original   : not validated as it is ({original.error})" if original.error
                else f"  original   : {len(original.issues)} schema error(s)")
+    if original.ntia is not None:
+        typer.echo(f"  ntia       : original {ntia_summary(original.ntia)}")
     typer.echo(f"  validate   : converted file vs CycloneDX {conv.target_version} schema: {len(r.original_issues)} error(s)"
                + (" -> repaired" if r.original_issues and final_ok else ""))
     for kw, pth, n, msg in group(r.original_issues)[:10]:

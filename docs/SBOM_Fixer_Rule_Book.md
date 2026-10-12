@@ -268,6 +268,7 @@ The terminal shows each step:
 ```text
 sbom.json: cyclonedx 1.5 -> converted to CycloneDX 1.5
   original   : 0 schema error(s)
+  ntia       : original FAIL - supplier 72/320, author missing
   validate   : converted file vs CycloneDX 1.5 schema: 0 error(s)
   tool       : Tool cyclonedx-java for the ecosystem java: 320 of 320 components
   changes    : 703 (323 WARN, 0 DATA_LOSS)
@@ -359,7 +360,8 @@ For an input `sbom.json`, `fix` writes exactly three files:
 
 | Section | What it tells you |
 |---|---|
-| Summary | Input (format, version, generator, component count), output (version, component and dependency counts), the tool name chosen and why, change counts, original schema errors, exit code, NTIA result and sbomqs score |
+| Summary | Input (format, version, generator, component count), output (version, component and dependency counts), the tool name chosen and why, change counts, original schema errors, exit code, NTIA result of the original and of the corrected file, sbomqs score |
+| NTIA minimum elements | The seven NTIA elements for the original and the corrected file, for example `Supplier name 72 / 320 ✗` |
 | What was done | The three steps: conversion notes, the schema errors of the converted file grouped by cause, the output layout |
 | Changes by rule | One row per rule: what it does, kind, count and an example. Kind **fix** = a problem of the input that was repaired; **layout** = reshaped for Checkmarx (data Checkmarx does not read is dropped from this copy only) |
 | Not changed (findings) | Things the tool noticed but did not change |
@@ -371,8 +373,11 @@ For an input `sbom.json`, `fix` writes exactly three files:
 | 1 | No licence | 13 | antlr-runtime@3.4, aos-common-models@SB3-0.0.1, api-commons@SB3-0.0.1, ... +8 more | Add the licence (SPDX id, e.g. MIT, Apache-2.0) to the package manifest (pom, csproj, package.json); for own libraries set it in the build. |
 | 2 | Schema error at `/serialNumber`: 'ACME-0001' does not match '^urn:uuid:...' | 1 | - | Write the value in the expected pattern (for example urn:uuid:... for serialNumber). |
 | 3 | No root component (metadata.component) | 1 | root component | Let the generator write the application itself as metadata.component (name, version). |
+| 4 | No supplier (NTIA) | 248 of 320 | bean-matchers@0.13, lucene-sandbox@7.5.0, ... +243 more | Let the generator write the supplier of every package (from the package metadata: the organization element of the pom, authors in the nuspec or package.json); for own libraries set your company. |
+| 5 | No SBOM author (NTIA) | - | - | Set metadata.authors (CycloneDX) or a Person/Organization creator (SPDX) to the team that produced the SBOM. |
 
-Schema errors of the original come first (grouped by cause), then the data problems, then pipeline hints. A problem
+Schema errors of the original come first (grouped by cause), then the data problems, then the NTIA minimum
+elements the original misses, then pipeline hints. A problem
 is listed once: the repair of a schema error is not listed again. With nothing to fix the file says
 "No issues found. Nothing to fix."
 
@@ -481,7 +486,13 @@ sbom-fixer verify build\sbom-fixed\sbom.corrected.cdx.json --expected-packages 1
 
 ## Step 13 – Quality audit (NTIA and sbomqs)
 
-`fix` audits the corrected file and writes the result into the tech notes summary: NTIA minimum elements (supplier, component name, version, unique identifier, dependencies, SBOM author, timestamp) and the sbomqs score (0 to 10). `--no-audit` skips it.
+`fix` checks the NTIA minimum elements (supplier, component name, version, unique identifier, dependencies, SBOM author, timestamp) of the **original** and of the **corrected** file:
+
+- console: `ntia : original FAIL - supplier 72/320, author missing` (or `PASS`);
+- suggestions: one row per missing element, with the count, the components and the fix (for example "No supplier (NTIA) | 248 of 320 | bean-matchers@0.13, ...");
+- tech notes: the summary lines and a table of the seven elements, original next to corrected.
+
+The NTIA check is built in and always runs. The sbomqs score (0 to 10) of the corrected file is added to the tech notes; `--no-audit` skips sbomqs.
 
 The canonical form keeps only what Checkmarx reads, so supplier and author are not in the corrected file and NTIA usually shows FAIL there. This does not matter for the Checkmarx import; keep the original for NTIA and audits. The suggestions file lists the gaps to fix at the source:
 

@@ -16,6 +16,7 @@ sbom-fixer fix ratecard-sbom.json --out out
 
 ratecard-sbom.json: cyclonedx 1.5 -> converted to CycloneDX 1.5
   original   : 0 schema error(s)
+  ntia       : original FAIL - supplier 72/320, author missing
   validate   : converted file vs CycloneDX 1.5 schema: 0 error(s)
   tool       : Tool cyclonedx-java for the ecosystem java: 320 of 320 components
   changes    : 703 (323 WARN, 0 DATA_LOSS)
@@ -239,7 +240,8 @@ input (SPDX input: 1.6).
 
 | Section | Content |
 |---|---|
-| Summary | Input (format, version, generator, component count), output (version, components, dependency entries), the chosen tool name and why, number of changes, schema errors of the original, exit code, NTIA result and sbomqs score |
+| Summary | Input (format, version, generator, component count), output (version, components, dependency entries), the chosen tool name and why, number of changes, schema errors of the original, exit code, NTIA result of the original and of the corrected file, sbomqs score |
+| NTIA minimum elements | Table of the seven NTIA elements (supplier, name, version, unique identifier, dependencies, author, timestamp) for the original and the corrected file |
 | What was done | Conversion notes, the schema errors of the converted file grouped by cause, the output layout |
 | Changes by rule | One row per rule: rule ID, what it does, kind, count, an example. **fix** = a problem of the input that was repaired; **layout** = reshaped for Checkmarx |
 | Not changed | Things noticed but not changed |
@@ -253,10 +255,12 @@ One short table, one row per problem:
 |---:|---|---:|---|---|
 | 1 | No licence | 13 | antlr-runtime@3.4, aos-common-models@SB3-0.0.1, ... +8 more | Add the licence (SPDX id, e.g. MIT, Apache-2.0) to the package manifest (pom, csproj, package.json); for own libraries set it in the build. |
 | 2 | No root component (metadata.component) | 1 | root component | Let the generator write the application itself as metadata.component (name, version). |
-| 3 | Pipeline | - | - | Set metadata.authors (the team that produced the SBOM); NTIA requires an author. |
+| 3 | No supplier (NTIA) | 248 of 320 | bean-matchers@0.13, lucene-sandbox@7.5.0, ... +243 more | Let the generator write the supplier of every package (from the package metadata: the organization element of the pom, authors in the nuspec or package.json); for own libraries set your company. |
+| 4 | No SBOM author (NTIA) | - | - | Set metadata.authors (CycloneDX) or a Person/Organization creator (SPDX) to the team that produced the SBOM. |
 ```
 
-Schema errors of the original come first, then data problems, then pipeline hints. Each problem appears once.
+Schema errors of the original come first, then data problems, then the NTIA minimum elements the original
+misses (supplier, name, version, unique identifier, dependencies, author, timestamp), then pipeline hints. Each problem appears once.
 Layout changes (dropped hashes, qualifiers, the reshaped `tools`) are not listed: they are not mistakes of the
 original. With nothing to fix the file says "No issues found. Nothing to fix."
 
@@ -569,7 +573,8 @@ reason; the tech notes and the suggestions are generated from that record.
 - DLLs or JARs that are not in a package cache, and company-internal libraries, stay `pkg:generic`. Generate the SBOM
   from the project (`dotnet CycloneDX`, CycloneDX Maven/Gradle plugin, `cyclonedx-npm`) for exact purls.
 - The canonical form drops supplier and author, so the NTIA check of the corrected file usually fails; keep the
-  original for NTIA and audits.
+  original for NTIA and audits. The NTIA gaps of the original are in the console output (`ntia :` line), the
+  suggestions and the tech notes.
 - CycloneDX 1.7 acceptance and the `cx` flags used by `verify` are provisional until checked against your tenant
   (`docs/checkmarx-matrix.md`).
 - The files in `corpus/` are synthetic, modelled on typical generator output; add real SBOMs from your pipelines.

@@ -20,4 +20,6 @@
 | 16 | Same package listed twice | 1 | commons-io@2.11 | List each package once. |
 | 17 | No licence | 1 | left-pad@1.3.0 | Add the licence (SPDX id, e.g. MIT, Apache-2.0) to the package manifest (pom, csproj, package.json); for own libraries set it in the build. |
 | 18 | No root component (metadata.component) | 1 | root component | Let the generator write the application itself as metadata.component (name, version). |
-| 19 | Pipeline | - | - | Set metadata.authors (the team that produced the SBOM); NTIA requires an author. |
+| 19 | No supplier (NTIA) | 4 of 4 | lodash@4.17.20, lodash@4.17.20, commons-io, left-pad | Let the generator write the supplier of every package (from the package metadata: the organization element of the pom, authors in the nuspec or package.json); for own libraries set your company. |
+| 20 | No component version (NTIA) | 1 of 4 | left-pad | Write the resolved version of every package. |
+| 21 | No unique identifier: purl, CPE or SWID (NTIA) | 1 of 4 | commons-io | Use a generator that writes a purl for every package. |

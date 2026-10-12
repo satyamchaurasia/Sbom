@@ -157,3 +157,28 @@ def test_non_sbom_json_says_it_was_not_validated(tmp_path: Path) -> None:
     _, output, folder = run_fix({}, tmp_path)
     assert "not validated as it is" in output and "0 schema error(s)" not in output
     assert "not validated as it is" in (folder / "in.tech-notes.md").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- NTIA of the original
+
+
+def test_ntia_gaps_of_the_original_are_reported(tmp_path: Path) -> None:
+    full = {"bomFormat": "CycloneDX", "specVersion": "1.5", "version": 1,
+            "metadata": {"timestamp": "2026-10-01T10:00:00Z", "authors": [{"name": "Team A"}],
+                         "component": {"type": "application", "name": "app", "version": "1", "bom-ref": "app"}},
+            "components": [{"type": "library", "bom-ref": "a", "name": "a", "version": "1", "purl": "pkg:npm/a@1",
+                            "supplier": {"name": "A Inc"}, "licenses": [{"license": {"id": "MIT"}}]}],
+            "dependencies": [{"ref": "app", "dependsOn": ["a"]}, {"ref": "a", "dependsOn": []}]}
+    _, output, folder = run_fix(full, tmp_path, "full")
+    assert "ntia       : original PASS" in output
+    advice = (folder / "full.suggestions.md").read_text(encoding="utf-8")
+    assert "(NTIA)" not in advice
+    gaps = json.loads(json.dumps(full))
+    del gaps["metadata"]["authors"]
+    del gaps["components"][0]["supplier"]
+    _, output, folder = run_fix(gaps, tmp_path, "gaps")
+    assert "ntia       : original FAIL - supplier 0/1, author missing" in output
+    advice = (folder / "gaps.suggestions.md").read_text(encoding="utf-8")
+    assert "| No supplier (NTIA) | 1 of 1 | a@1 |" in advice and "| No SBOM author (NTIA) |" in advice
+    notes = (folder / "gaps.tech-notes.md").read_text(encoding="utf-8")
+    assert "| Author of SBOM data | no ✗ | no ✗ |" in notes

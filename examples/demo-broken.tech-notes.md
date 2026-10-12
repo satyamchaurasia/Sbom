@@ -8,7 +8,23 @@
 - **Changes:** 29 in total; 22 fixed problems of the input, 7 layout changes for Checkmarx
 - **Original schema errors:** 13 (details in the suggestions file)
 - **Exit code:** 1 (fixed)
-- **NTIA minimum elements after the fix:** FAIL, sbomqs 3.9
+- **NTIA minimum elements (original):** FAIL - supplier 0/4, component 3/4, unique 3/4
+- **NTIA minimum elements (corrected):** FAIL - supplier 0/3, author missing, sbomqs 3.9
+
+## NTIA minimum elements
+
+| NTIA element | Original | Corrected |
+|---|---|---|
+| Supplier name | 0 / 4 ✗ | 0 / 3 ✗ |
+| Component name | 4 / 4 | 3 / 3 |
+| Component version | 3 / 4 ✗ | 3 / 3 |
+| Unique identifier | 3 / 4 ✗ | 3 / 3 |
+| Dependency relationships | yes | yes |
+| Author of SBOM data | yes | no ✗ |
+| Timestamp | yes | yes |
+| **Result** | **FAIL** | **FAIL** |
+
+The corrected file keeps only what Checkmarx reads (no supplier, no author), so its NTIA result is usually FAIL. Use the original for NTIA; fix the gaps of the original at the source (suggestions file).
 
 ## What was done
 

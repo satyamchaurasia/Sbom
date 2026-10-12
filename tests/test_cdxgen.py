@@ -218,13 +218,20 @@ def test_cli_ratecard_java(tmp_path: Path) -> None:
     # one short row per problem: what is missing, how many, which components, how to fix it
     assert "| # | Missing / wrong | Count | Components | Fix |" in advice
     assert "| No licence | 13 | antlr-runtime@3.4" in advice
+    # NTIA gaps of the original: 248 of 320 components without supplier, no SBOM author
+    assert "| No supplier (NTIA) | 248 of 320 | bean-matchers@0.13" in advice
+    assert "| No SBOM author (NTIA) |" in advice
     # qualifiers dropped for Checkmarx are not an issue of the original
-    assert "purl" not in advice and len(advice.splitlines()) == 5
+    assert "?type=jar" not in advice and len(advice.splitlines()) == 7
+    assert "ntia       : original FAIL - supplier 72/320, author missing" in res.output
+    assert "| Supplier name | 72 / 320 ✗ | 0 / 320 ✗ |" in notes
     again = runner.invoke(app, ["fix", str(tmp_path / "ratecard-sbom.corrected.cdx.json"), "--out",
                                 str(tmp_path / "again"), "--no-audit", "--name", "out.json"])
     assert again.exit_code == 0, again.output
     assert json.loads((tmp_path / "again" / "out.json").read_text(encoding="utf-8")) == out
-    assert "No issues found" in next((tmp_path / "again").glob("*.suggestions.md")).read_text(encoding="utf-8")
+    # nothing left to repair; only the NTIA gaps of the canonical form (it keeps no supplier or author)
+    again_advice = next((tmp_path / "again").glob("*.suggestions.md")).read_text(encoding="utf-8")
+    assert "No licence" not in again_advice and "No supplier (NTIA)" in again_advice
 
 
 def test_cli_empty_components_kept(tmp_path: Path) -> None:
