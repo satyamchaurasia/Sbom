@@ -20,6 +20,7 @@ from urllib.parse import unquote, urlsplit
 
 from packageurl import PackageURL
 
+from ..binpath import looks_like_file, purl_from_component_paths
 from ..changes import INFO, WARN
 from ..ecosystem import detect_ecosystem
 from ..purlmap import URL_RE, try_purl
@@ -58,7 +59,7 @@ def is_reduction(change: Any) -> bool:
     if rid in ("CXN-020", "CXN-040") and change.path.endswith("/purl") and isinstance(change.before, str):
         # only qualifiers (?type=jar) or the subpath dropped: a valid purl, shortened for this copy
         return re.split(r"[?#]", change.before, maxsplit=1)[0] == change.after
-    return rid == "CXN-050" and reason.startswith("dependency fields")
+    return rid == "CXN-050" and (reason.startswith("dependency fields") or action == "added")
 
 
 def _components(doc: dict[str, Any]) -> list[dict[str, Any]]:
@@ -140,6 +141,11 @@ def document_ecosystem(doc: dict[str, Any]) -> str | None:
     return res.ecosystem
 
 
+def _same_name(a: str, b: str) -> bool:
+    """Package names that differ only in case, '-', '_' or '.' (registries normalise them differently)."""
+    return re.sub(r"[-_.]", "", a).lower() == re.sub(r"[-_.]", "", b).lower()
+
+
 def _from_references(c: dict[str, Any], version: str | None) -> PackageURL | None:
     """purl from a registry URL in the component's externalReferences (distribution, website, vcs, ...)."""
     from ..purlmap import purl_from_url
@@ -202,6 +208,10 @@ def _canonical_purl(c: dict[str, Any], keep_qualifiers: bool, fallback: str,
             source, p = "bom-ref", try_purl(ref)
     if p is not None and has_url(p.to_string().split("?", 1)[0]):
         p = None  # a URL inside namespace or name: not a usable purl, rebuilt below
+    if p is not None and p.type.lower() == "generic":
+        cached = purl_from_component_paths(c)  # a generic DLL/JAR that sits in a NuGet or Maven cache
+        if cached is not None:
+            return cached.to_string(), "from-path"
     if p is not None:
         new = PackageURL(type=p.type.lower(), namespace=p.namespace, name=p.name, version=p.version or version,
                          qualifiers=p.qualifiers if keep_qualifiers else None,
@@ -212,6 +222,9 @@ def _canonical_purl(c: dict[str, Any], keep_qualifiers: bool, fallback: str,
     name = _str(c.get("name"))
     if not name:
         return None, "none"
+    cached = purl_from_component_paths(c)
+    if cached is not None:
+        return cached.to_string(), "from-path"
     eco = _ecosystem(c)
     if eco:
         try:
@@ -221,12 +234,13 @@ def _canonical_purl(c: dict[str, Any], keep_qualifiers: bool, fallback: str,
         if built is not None:
             return built.to_string(), "built"
     found = _from_references(c, version)
-    if found is not None:
+    if found is not None and _same_name(found.name, name):
         return PackageURL(type=found.type, namespace=found.namespace, name=found.name,
-                          version=found.version or version).to_string(), "from-url"
+                          version=version or found.version).to_string(), "from-url"
     ptype = ECOSYSTEM_PURL_TYPE.get(doc_ecosystem or "")
     group = _str(c.get("group"))
-    if ptype and version and (group or ptype not in _NEEDS_NAMESPACE):
+    # a file name (Newtonsoft.Json.dll, version 13.0.0.0 = assembly version) is not a package name: never guessed
+    if ptype and version and (group or ptype not in _NEEDS_NAMESPACE) and not looks_like_file(name):
         try:
             built = _build(ptype, _dashes(name), version, group)
         except ValueError:
@@ -244,8 +258,10 @@ class PurlCanonical(CanonicalRule):
     title = "purl in the form Checkmarx matches"
     description = ("Every component got a purl of the form pkg:type/[namespace/]name@version: the type in lower case, "
                    "qualifiers and subpath removed (Checkmarx does not use them), the version filled from the component. "
+                   "A missing (or generic) purl of a DLL/JAR in a NuGet or Maven cache path became that package's purl. "
                    "A missing purl was built from the bom-ref, the component's registry URL, or the SBOM's one "
-                   "ecosystem (Erlang -> pkg:hex, .NET -> pkg:nuget, ...; not when the SBOM mixes ecosystems), otherwise as "
+                   "ecosystem (Erlang -> pkg:hex, .NET -> pkg:nuget, ...; not when the SBOM mixes ecosystems, and never "
+                   "for a file name such as Foo.dll), otherwise as "
                    "pkg:generic/<name>@<version> (Checkmarx skips generic components but no purl is ever null). A purl never "
                    "holds a web URL (http/https): URLs are converted to the registry purl or dropped.")
     source_fix = "Let the generator write a plain purl (pkg:type/namespace/name@version) for every component."
@@ -271,11 +287,18 @@ class PurlCanonical(CanonicalRule):
                 "from-bom-ref": "purl taken from the bom-ref",
                 "built": "purl built from the ecosystem named by the generator",
                 "from-url": "purl taken from the component's registry URL (externalReferences)",
+                "from-path": "purl taken from the package-cache path of the file (NuGet / Maven cache)",
                 "from-ecosystem": f"no purl; built for the SBOM's ecosystem ({doc_eco}: pkg:{ECOSYSTEM_PURL_TYPE.get(doc_eco or '')})",
                 "generic": "no ecosystem known; generic purl so the component has one (Checkmarx will not scan it)",
             }.get(how, how)
             ctx.log.add(self.id, path, "replaced" if old is not None else "added", old, new,
                         WARN if how == "generic" else INFO, reason)
+            package = try_purl(new) if how == "from-path" else None
+            if package is not None and package.version and c.get("version") != package.version:
+                # the file version (assembly / manifest version) is not the package version Checkmarx looks up
+                ctx.log.add(self.id, f"/components/{i}/version", "replaced", c.get("version"), package.version, INFO,
+                            "version set to the package version from the cache path (the file version differs)")
+                c["version"] = package.version
 
 
 def canonical_licenses(value: Any) -> list[dict[str, Any]]:
@@ -520,10 +543,9 @@ class DependenciesCanonical(CanonicalRule):
                   "with one entry per ref.")
 
     def run(self, doc: dict[str, Any], ctx: Ctx) -> None:
-        deps = doc.get("dependencies")
-        if deps is None:
-            return
-        valid = {c["bom-ref"] for c in _components(doc) if isinstance(c.get("bom-ref"), str)}
+        deps = doc.get("dependencies") or []
+        refs = [c["bom-ref"] for c in _components(doc) if isinstance(c.get("bom-ref"), str)]
+        valid = set(refs)
         meta = doc.get("metadata")
         root = meta.get("component") if isinstance(meta, dict) else None
         if isinstance(root, dict) and isinstance(root.get("bom-ref"), str):
@@ -548,7 +570,13 @@ class DependenciesCanonical(CanonicalRule):
             if extra:
                 ctx.log.add(self.id, path, "removed", {k: d[k] for k in extra}, None, INFO,
                             f"dependency fields not read by Checkmarx dropped: {', '.join(extra)}")
-        doc["dependencies"] = [{"ref": r, "dependsOn": t} for r, t in merged.items()]
+        for ref in ([root["bom-ref"]] if isinstance(root, dict) and isinstance(root.get("bom-ref"), str) else []) + refs:
+            if ref not in merged:  # cdxgen layout: every component has an entry (dependsOn unknown = [])
+                merged[ref] = []
+                ctx.log.add(self.id, "/dependencies/-", "added", None, {"ref": ref, "dependsOn": []}, INFO,
+                            "dependencies entry added for a component without one (dependsOn unknown)")
+        if merged or "dependencies" in doc:
+            doc["dependencies"] = [{"ref": r, "dependsOn": t} for r, t in merged.items()]
 
 
 @register

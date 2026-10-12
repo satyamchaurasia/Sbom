@@ -208,8 +208,9 @@ class RequiredFields(Rule):
     def _component(self, doc: Any, ctx: Ctx, issue: Issue, comp: dict[str, Any], missing: str) -> None:
         purl = _purl(comp)
         path = issue.path
-        if issue.parts == ("metadata", "component") and missing in ("type", "name") and purl is None:
-            # the root component is kept: a blank required field instead of dropping the whole root
+        root = issue.parts == ("metadata", "component")
+        if root and (missing == "version" or (missing in ("type", "name") and purl is None))                 and not (missing == "version" and purl is not None and purl.version):
+            # the root component is kept: a blank required field instead of dropping the whole root or inventing one
             comp[missing] = "application" if missing == "type" else ""
             ctx.log.add(self.id, f"{path}/{missing}", "added", None, comp[missing], WARN,
                         f"metadata.component has no {missing}; set to {comp[missing]!r} so the root is kept")

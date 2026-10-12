@@ -95,7 +95,8 @@ def fix(
         typer.echo(f"  convert    : {note}")
     if keep_converted:
         typer.echo(f"  converted  : {converted}")
-    typer.echo(f"  original   : {len(original.issues)} schema error(s)" + (f" ({original.error})" if original.error else ""))
+    typer.echo(f"  original   : not validated as it is ({original.error})" if original.error
+               else f"  original   : {len(original.issues)} schema error(s)")
     typer.echo(f"  validate   : converted file vs CycloneDX {conv.target_version} schema: {len(r.original_issues)} error(s)"
                + (" -> repaired" if r.original_issues and final_ok else ""))
     for kw, pth, n, msg in group(r.original_issues)[:10]:

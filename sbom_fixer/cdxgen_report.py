@@ -91,9 +91,14 @@ class OriginalCheck:
     components: int = 0
 
 
+def _code(text: str) -> str:
+    """A path as inline code that cannot break a Markdown table (a pipe splits a cell even inside backticks)."""
+    return "`" + text.replace("`", "'").replace("|", "\\|").replace("\r", " ").replace("\n", " ") + "`"
+
+
 def _short(value: Any, limit: int = 90) -> str:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
-    text = text.replace("|", "\\|").replace("\n", " ")
+    text = text.replace("|", "\\|").replace("\r", " ").replace("\n", " ").replace("`", "'")
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
@@ -113,10 +118,10 @@ def _title(rule_id: str) -> str:
 
 def _example(c: Change) -> str:
     if c.action == "removed":
-        return f"`{c.path}` removed: {_short(c.before, 60)}"
+        return f"{_code(c.path)} removed: {_short(c.before, 60)}"
     if c.before is None:
-        return f"`{c.path}` = {_short(c.after, 60)}"
-    return f"`{c.path}`: {_short(c.before, 45)} -> {_short(c.after, 45)}"
+        return f"{_code(c.path)} = {_short(c.after, 60)}"
+    return f"{_code(c.path)}: {_short(c.before, 45)} -> {_short(c.after, 45)}"
 
 
 def _components(doc: Any) -> int:
@@ -143,7 +148,8 @@ def tech_notes(result: RunResult, conv: Conversion, original: OriginalCheck, sbo
     L.append(f"- **Tool in metadata:** {tool_line}")
     L.append(f"- **Changes:** {len(result.log.changes):,} in total; {len(issues):,} fixed problems of the input, "
              f"{len(reductions):,} layout changes for Checkmarx")
-    L.append(f"- **Original schema errors:** {len(original.issues):,} (details in the suggestions file)")
+    L.append(f"- **Original schema errors:** not validated as it is ({original.error})" if original.error
+             else f"- **Original schema errors:** {len(original.issues):,} (details in the suggestions file)")
     L.append(f"- **Exit code:** {result.exit_code} ({_EXIT_TEXT.get(result.exit_code, 'see README')})")
     if result.quality is not None:
         q = result.quality
@@ -158,7 +164,7 @@ def tech_notes(result: RunResult, conv: Conversion, original: OriginalCheck, sbo
     L.append(f"2. **Validated** the converted file against the CycloneDX {conv.target_version} schema: "
              f"{len(result.original_issues):,} error(s).")
     for kw, pth, n, msg in group(result.original_issues)[:10]:
-        L.append(f"   - {n:,} x `{kw}` at `{pth}`: {_short(msg, 100)}")
+        L.append(f"   - {n:,} x `{kw}` at {_code(pth)}: {_short(msg, 100)}")
     L.append("3. **Repaired and reduced to the Checkmarx layout** on the same CycloneDX version "
              "(specVersion is never changed). Output layout:")
     L += ["   - top level: `bomFormat`, `specVersion`, `serialNumber`, `version`, `metadata`, `components`, "
@@ -173,7 +179,7 @@ def tech_notes(result: RunResult, conv: Conversion, original: OriginalCheck, sbo
         for rid, items in _by_rule(items_of_kind):
             L.append(f"| {rid} | {_title(rid)} | {kind} | {len(items):,} | {_example(items[0])} |")
     if not result.log.changes:
-        L.append("| - | no changes | 0 | - | - |")
+        L.append("| - | no changes | - | 0 | - |")
     L.append("")
     L.append("*fix* = a problem of the input that was repaired; *layout* = reshaped for the Checkmarx layout; data Checkmarx does not read is dropped from "
              "this copy only (the original file keeps it).")
@@ -181,7 +187,7 @@ def tech_notes(result: RunResult, conv: Conversion, original: OriginalCheck, sbo
     if result.log.findings:
         L += ["## Not changed (findings)", ""]
         for f in result.log.findings[:30]:
-            L.append(f"- [{f.rule_id}] `{f.path or '/'}`: {f.message}")
+            L.append(f"- [{f.rule_id}] {_code(f.path or '/')}: {f.message}")
         if len(result.log.findings) > 30:
             L.append(f"- ... {len(result.log.findings) - 30:,} more")
         L.append("")
@@ -209,7 +215,7 @@ def suggestions(result: RunResult, original: OriginalCheck) -> str:
         L += ["| Count | Keyword | Where | Example | How to fix |", "|---:|---|---|---|---|"]
         for kw, pth, cnt, msg in group(original.issues)[:40]:
             hint = _SCHEMA_HINTS.get(kw, "Check the field against the schema.")
-            L.append(f"| {cnt:,} | {kw} | `{pth}` | {_short(msg, 80)} | {hint} |")
+            L.append(f"| {cnt:,} | {kw} | {_code(pth)} | {_short(msg, 80)} | {hint} |")
         L.append("")
 
     L += ["## 2. Data problems sbom-fixer had to repair", ""]

@@ -241,6 +241,12 @@ def coerce_to_schema(doc: dict[str, Any], spec: str, version: str, log: ChangeLo
                 continue
             issue = targets[parts]
             new = _convert(old, issue.expected) if issue.keyword == "type" else NONE
+            if parts == ("metadata", "component") and issue.keyword in ("type", "required"):
+                # the root component is kept: missing required fields are left blank, never invented, never dropped
+                base = new if isinstance(new, dict) else (dict(old) if isinstance(old, dict) else None)
+                blanks = {"type": "application", "name": ""} | ({"version": ""} if version in ("1.2", "1.3") else {})
+                if base is not None and any(k not in base for k in blanks):
+                    new = {**{k: v for k, v in blanks.items() if k not in base}, **base}
             if new is not NONE:
                 container[parts[-1]] = new
                 log.add("COERCE-001", pointer(parts), "converted", old, new, "WARN",

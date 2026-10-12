@@ -104,7 +104,11 @@ Three steps:
    none it is `{"type": "application", "name": ""}` (plus `"version": ""` on CycloneDX 1.2/1.3, where the schema
    requires it), and a root without a name or type gets them blank instead of being dropped). **No purl or bom-ref holds
    a web URL** (http/https, also percent-encoded): a URL that is not a known registry is moved out of the purl and the
-   component gets `pkg:generic/<name>@<version>`. `metadata.tools` is named after the **detected ecosystem**:
+   component gets `pkg:generic/<name>@<version>`. A component without a purl gets one, in this order: a DLL/JAR
+   whose file path is in a NuGet or Maven/Gradle cache gets that package's purl and version
+   (`.nuget/packages/newtonsoft.json/13.0.3/...` → `pkg:nuget/newtonsoft.json@13.0.3`); a registry URL in its
+   externalReferences that names the same package; the SBOM's single ecosystem (Erlang → `pkg:hex`, never for a file
+   name such as `Foo.dll`); else `pkg:generic`. `metadata.tools` is named after the **detected ecosystem**:
 
    | Ecosystem (purl types) | Tool name |
    |---|---|

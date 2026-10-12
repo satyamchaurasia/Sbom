@@ -185,7 +185,8 @@ def test_top_level_sections_dropped_and_version_kept() -> None:
     d["$schema"] = "http://cyclonedx.org/schema/bom-1.6.schema.json"
     out, res, _ = checkmarx_doc(d)
     assert res.ok and res.final_version == "1.6"
-    assert list(out) == ["bomFormat", "specVersion", "serialNumber", "version", "metadata", "components"]
+    # dependencies: one entry per component (the cdxgen layout), also when the input had none
+    assert list(out) == ["bomFormat", "specVersion", "serialNumber", "version", "metadata", "components", "dependencies"]
 
 
 def test_cdx13_component_without_version_gets_one() -> None:
