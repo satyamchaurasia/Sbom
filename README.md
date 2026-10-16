@@ -8,8 +8,8 @@ You give it a CycloneDX or SPDX JSON file. It gives back three files:
 | File | What it is |
 |---|---|
 | `<name>.corrected.cdx.json` | The corrected SBOM. Upload this to Checkmarx. |
-| `<name>.tech-notes.md` | What was changed, with a summary. |
-| `<name>.suggestions.md` | A short table of what is missing or wrong in the original and how to fix it at the generator. |
+| `<name>.tech-notes.txt` | What was changed, with a summary. |
+| `<name>.suggestions.txt` | A short table of what is missing or wrong in the original and how to fix it at the generator. |
 
 ```text
 sbom-fixer fix ratecard-sbom.json --out out
@@ -21,8 +21,8 @@ ratecard-sbom.json: cyclonedx 1.5 -> converted to CycloneDX 1.5
   tool       : Tool cyclonedx-java for the ecosystem java: 320 of 320 components
   changes    : 703 (323 WARN, 0 DATA_LOSS)
   sbom       : out\ratecard-sbom.corrected.cdx.json (schema-valid CycloneDX 1.5)
-  tech notes : out\ratecard-sbom.tech-notes.md
-  suggestions: out\ratecard-sbom.suggestions.md
+  tech notes : out\ratecard-sbom.tech-notes.txt
+  suggestions: out\ratecard-sbom.suggestions.txt
   exit code  : 1
 ```
 
@@ -87,7 +87,7 @@ Linux/macOS: `source .venv/bin/activate`.
 
 Then:
 
-1. Read `build\sbom-fixed\sbom.suggestions.md`. Those are the problems to fix in your generator or build.
+1. Read `build\sbom-fixed\sbom.suggestions.txt`. Those are the problems to fix in your generator or build.
 2. Upload `build\sbom-fixed\sbom.corrected.cdx.json` to Checkmarx (never the original).
 3. Optional: `sbom-fixer verify build\sbom-fixed\sbom.corrected.cdx.json` uploads it to a test project and checks the import.
 
@@ -113,7 +113,7 @@ Then:
  4. Canonical form ──── the layout Checkmarx ingests (top level, metadata, components, purls, licences, dependencies)
     │
     ▼
- 5. Check and write ─── validated again; corrected.cdx.json + tech-notes.md + suggestions.md
+ 5. Check and write ─── validated again; corrected.cdx.json + tech-notes.txt + suggestions.txt
 ```
 
 ### Step 1 – Convert
@@ -236,27 +236,40 @@ A DLL found by a binary scan:
 The SBOM to upload: CycloneDX in the canonical form, UTF-8 without BOM, schema-valid, same CycloneDX version as the
 input (SPDX input: 1.6).
 
-### `<name>.tech-notes.md` – what was changed
+### `<name>.tech-notes.txt` – what was changed
+
+Plain text, short lines, numbered sections. Open it in Notepad.
 
 | Section | Content |
 |---|---|
-| Summary | Input (format, version, generator, component count), output (version, components, dependency entries), the chosen tool name and why, number of changes, schema errors of the original, exit code, NTIA result of the original and of the corrected file, sbomqs score |
-| NTIA minimum elements | Table of the seven NTIA elements (supplier, name, version, unique identifier, dependencies, author, timestamp) for the original and the corrected file |
-| What was done | Conversion notes, the schema errors of the converted file grouped by cause, the output layout |
-| Changes by rule | One row per rule: rule ID, what it does, kind, count, an example. **fix** = a problem of the input that was repaired; **layout** = reshaped for Checkmarx |
-| Not changed | Things noticed but not changed |
+| 1. SUMMARY | Input (format, version, generator, component count), output (version, components, dependency entries), the chosen tool name, number of changes, schema errors of the original, result, NTIA result of the original and of the corrected file, sbomqs score |
+| 2. NTIA MINIMUM ELEMENTS | The seven NTIA elements (supplier, name, version, unique identifier, dependencies, author, timestamp) for the original and the corrected file; `(gap)` marks what is missing |
+| 3. WHAT WAS DONE | Conversion notes, the schema errors of the converted file grouped by cause, the output layout |
+| 4. CHANGES MADE | One entry per rule: rule ID, what it does, how many times, an example. **FIX** = a problem of the input that was repaired; **LAYOUT** = reshaped for Checkmarx |
+| 5. NOTICED BUT NOT CHANGED | Things noticed but not changed |
 
-### `<name>.suggestions.md` – what to fix in the original
+### `<name>.suggestions.txt` – what to fix in the original
 
-One short table, one row per problem:
+One short entry per problem: what is wrong, how many components, which ones, and how to fix it:
 
-```markdown
-| # | Missing / wrong | Count | Components | Fix |
-|---:|---|---:|---|---|
-| 1 | No licence | 13 | antlr-runtime@3.4, aos-common-models@SB3-0.0.1, ... +8 more | Add the licence (SPDX id, e.g. MIT, Apache-2.0) to the package manifest (pom, csproj, package.json); for own libraries set it in the build. |
-| 2 | No root component (metadata.component) | 1 | root component | Let the generator write the application itself as metadata.component (name, version). |
-| 3 | No supplier (NTIA) | 248 of 320 | bean-matchers@0.13, lucene-sandbox@7.5.0, ... +243 more | Let the generator write the supplier of every package (from the package metadata: the organization element of the pom, authors in the nuspec or package.json); for own libraries set your company. |
-| 4 | No SBOM author (NTIA) | - | - | Set metadata.authors (CycloneDX) or a Person/Organization creator (SPDX) to the team that produced the SBOM. |
+```text
+WHAT TO FIX IN YOUR SBOM
+========================
+File: ratecard-sbom.json
+
+4 problem(s) found in your original file. Fix them in the tool that creates
+the SBOM (your generator or build), then run sbom-fixer again.
+
+1. No licence
+   How many      : 13 component(s)
+   Which         : antlr-runtime@3.4, aos-common-models@SB3-0.0.1, ... and 8 more
+   How to fix    : Add the licence (SPDX id, e.g. MIT, Apache-2.0) to the
+                   package manifest (pom, csproj, package.json); for own
+                   libraries set it in the build.
+
+2. No SBOM author (NTIA)
+   How to fix    : Set metadata.authors (CycloneDX) or a Person/Organization
+                   creator (SPDX) to the team that produced the SBOM.
 ```
 
 Schema errors of the original come first, then data problems, then the NTIA minimum elements the original
@@ -520,7 +533,7 @@ on a command line or in a log.
 | `sbom_fixer/binpath.py` | Purls of DLL/JAR files from NuGet / Maven / Gradle cache paths |
 | `sbom_fixer/ecosystem.py` | Ecosystem detection and tool names |
 | `sbom_fixer/purlmap.py` | Registry URL → purl, Checkmarx purl coverage |
-| `sbom_fixer/cdxgen_report.py` | `tech-notes.md` and `suggestions.md` |
+| `sbom_fixer/cdxgen_report.py` | `tech-notes.txt` and `suggestions.txt` |
 | `sbom_fixer/complete.py` | `fill-all` |
 | `sbom_fixer/checkmarx.py` | `cx` CLI client for `verify` |
 | `sbom_fixer/audit/` | NTIA check, sbomqs wrapper, quality gate |

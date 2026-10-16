@@ -1,0 +1,124 @@
+WHAT TO FIX IN YOUR SBOM
+========================
+File: demo-broken.cdx.json
+
+21 problem(s) found in your original file. Fix them in the tool that creates
+the SBOM (your generator or build), then run sbom-fixer again.
+
+1. Schema error at /components/*/hashes/*/alg: 'sha256' is not one of ['MD5',
+   'SHA-1', 'SHA-256', 'SHA-384', 'SHA-...
+   How many      : 2 time(s)
+   How to fix    : Use one of the values the schema allows.
+
+2. Schema error at /components/*/version: 2.11 is not of type 'string'
+   How many      : 2 time(s)
+   How to fix    : Write the value with the JSON type the schema expects
+                   (string, number, array, object).
+
+3. Schema error at /components/*: Additional properties are not allowed
+   ('x-scanner-internal' was une...
+   How many      : 1 time(s)
+   How to fix    : Remove fields that are not part of this CycloneDX / SPDX
+                   version.
+
+4. Schema error at /components/*/description: None is not of type 'string'
+   How many      : 1 time(s)
+   How to fix    : Write the value with the JSON type the schema expects
+                   (string, number, array, object).
+
+5. Schema error at /components/*/externalReferences/*/url:
+   'https://registry.npmjs.org/lodash/-/lodash 4.17.20.tgz' is not a '...
+   How many      : 1 time(s)
+   How to fix    : Write the value in the expected format (for example
+                   date-time, iri-reference, email).
+
+6. Schema error at /components/*/hashes/*/content: 'not-a-real-hash' does not
+   match '^([a-fA-F0-9]{32}|[a-fA-F0-9]{40}...
+   How many      : 1 time(s)
+   How to fix    : Write the value in the expected pattern (for example
+                   urn:uuid:... for serialNumber).
+
+7. Schema error at /components/*/licenses/*: Additional properties are not
+   allowed ('license' was unexpected)
+   How many      : 1 time(s)
+   How to fix    : Remove fields that are not part of this CycloneDX / SPDX
+                   version.
+
+8. Schema error at /components/*/type: 'Library' is not one of ['application',
+   'framework', 'library', 'co...
+   How many      : 1 time(s)
+   How to fix    : Use one of the values the schema allows.
+
+9. Schema error at /components/*/licenses/*: 'MIT' is not of type 'object'
+   How many      : 1 time(s)
+   How to fix    : Write the value with the JSON type the schema expects
+                   (string, number, array, object).
+
+10. Schema error at /metadata/timestamp: '2026-10-02 10:00' is not a
+   'date-time'
+   How many      : 1 time(s)
+   How to fix    : Write the value in the expected format (for example
+                   date-time, iri-reference, email).
+
+11. Schema error at /serialNumber: 'DEMO-0001' does not match
+   '^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a...
+   How many      : 1 time(s)
+   How to fix    : Write the value in the expected pattern (for example
+                   urn:uuid:... for serialNumber).
+
+12. Dependency on a component that is not in the SBOM
+   How many      : 2 component(s)
+   How to fix    : List dependencies only between components that are in the
+                   SBOM.
+
+13. No purl
+   How many      : 1 component(s)
+   Which         : left-pad@1.3.0
+   How to fix    : Use a generator that writes a purl for every package.
+
+14. No tool in metadata.tools
+   How many      : 1 component(s)
+   How to fix    : Let the generator record itself in metadata.tools
+                   (CycloneDX) or creationInfo.creators (SPDX).
+
+15. Same bom-ref used twice
+   How many      : 1 component(s)
+   Which         : commons-io@2.11
+   How to fix    : Give every component a unique bom-ref.
+
+16. Same package listed twice
+   How many      : 1 component(s)
+   Which         : commons-io@2.11
+   How to fix    : List each package once.
+
+17. No licence
+   How many      : 1 component(s)
+   Which         : left-pad@1.3.0
+   How to fix    : Add the licence (SPDX id, e.g. MIT, Apache-2.0) to the
+                   package manifest (pom, csproj, package.json); for own
+                   libraries set it in the build.
+
+18. No root component (metadata.component)
+   How many      : 1 component(s)
+   Which         : root component
+   How to fix    : Let the generator write the application itself as
+                   metadata.component (name, version).
+
+19. No supplier (NTIA)
+   How many      : 4 of 4 components
+   Which         : lodash@4.17.20, lodash@4.17.20, commons-io, left-pad
+   How to fix    : Let the generator write the supplier of every package (from
+                   the package metadata: the organization element of the pom,
+                   authors in the nuspec or package.json); for own libraries
+                   set your company.
+
+20. No component version (NTIA)
+   How many      : 1 of 4 components
+   Which         : left-pad
+   How to fix    : Write the resolved version of every package.
+
+21. No unique identifier: purl, CPE or SWID (NTIA)
+   How many      : 1 of 4 components
+   Which         : commons-io
+   How to fix    : Use a generator that writes a purl for every package.
+

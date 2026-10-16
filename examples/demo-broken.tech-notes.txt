@@ -1,0 +1,158 @@
+WHAT SBOM-FIXER CHANGED
+=======================
+File: demo-broken.cdx.json
+
+1. SUMMARY
+----------
+   Input         : cyclonedx 1.6, 4 component(s)
+   Output        : demo-broken.corrected.cdx.json - CycloneDX 1.6,
+                   schema-valid, 3 component(s), 3 dependency entries
+   Tool name     : Tool cyclonedx-node for the ecosystem node: 2 of 3
+                   components (also java 1)
+   Changes       : 29 in total: 22 repairs of problems in your file, 7 layout
+                   changes for Checkmarx
+   Schema errors : 13 in your original file (see the suggestions file)
+   Result        : exit code 1 - fixed
+   NTIA original : FAIL - supplier 0/4, component 3/4, unique 3/4
+   NTIA corrected: FAIL - supplier 0/3, author missing  (sbomqs score 3.9 of
+                   10)
+
+2. NTIA MINIMUM ELEMENTS
+------------------------
+   NTIA element               Original       Corrected
+   ------------------------   ------------   ------------
+   Supplier name              0 / 4  (gap)   0 / 3  (gap)
+   Component name             4 / 4          3 / 3
+   Component version          3 / 4  (gap)   3 / 3
+   Unique identifier          3 / 4  (gap)   3 / 3
+   Dependency relationships   yes            yes
+   Author of SBOM data        yes            NO  (gap)
+   Timestamp                  yes            yes
+   RESULT                     FAIL           FAIL
+
+The corrected file keeps only what Checkmarx reads (no supplier, no author),
+so its NTIA result is usually FAIL. Use the original file for NTIA, and close
+the gaps of the original at the source (see the suggestions file).
+
+3. WHAT WAS DONE
+----------------
+Step 1 - Converted: cyclonedx 1.6 -> CycloneDX 1.6.
+   - 2 dependencies entries added (dependsOn unknown)
+Step 2 - Checked the converted file against the CycloneDX 1.6 schema: 13
+error(s).
+   - 2 x enum at /components/*/hashes/*/alg: 'sha256' is not one of ['MD5',
+     'SHA-1', 'SHA-256', 'SHA-384', 'SHA-512', 'SHA3-256', 'SHA3-384', ...
+   - 2 x type at /components/*/version: 2.11 is not of type 'string'
+   - 1 x additionalProperties at /components/*: Additional properties are not
+     allowed ('x-scanner-internal' was unexpected)
+   - 1 x type at /components/*/description: None is not of type 'string'
+   - 1 x format at /components/*/externalReferences/*/url:
+     'https://registry.npmjs.org/lodash/-/lodash 4.17.20.tgz' is not a
+     'iri-reference'
+   - 1 x pattern at /components/*/hashes/*/content: 'not-a-real-hash' does not
+     match '^([a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64}|[a-fA-F0-9]{9...
+   - 1 x additionalProperties at /components/*/licenses/*: Additional
+     properties are not allowed ('license' was unexpected)
+   - 1 x enum at /components/*/type: 'Library' is not one of ['application',
+     'framework', 'library', 'container', 'platform', 'operati...
+   - 1 x type at /components/*/licenses/*: 'MIT' is not of type 'object'
+   - 1 x format at /metadata/timestamp: '2026-10-02 10:00' is not a
+     'date-time'
+Step 3 - Repaired it and reduced it to the layout Checkmarx reads, on the same
+CycloneDX version (the version is never changed). The result looks like this:
+   - top level: bomFormat, specVersion, serialNumber, version, metadata,
+     components, dependencies (components is always there, [] when the input
+     has none)
+   - metadata: timestamp, tools, component (the root application)
+   - each component: bom-ref, type, name, version, purl, licenses (NOASSERTION
+     when unknown)
+   - removed: externalReferences, properties, evidence, description, and any
+     purl or bom-ref with http(s)
+   - dependencies only between components in the file, no self-dependencies
+
+4. CHANGES MADE (one entry per rule)
+------------------------------------
+FIX    = a problem in your file that was repaired.
+LAYOUT = reshaped for Checkmarx. Data Checkmarx does not read is dropped from
+this copy only; your original file keeps it.
+
+[FIX] REP-003 - Enum values in the exact form the schema expects (3x)
+      Example: /components/0/hashes/0/alg: sha256 -> SHA-256
+
+[FIX] REP-005 - Remove null and empty values the schema rejects (2x)
+      Example: /components/3/version = 1.3.0
+
+[FIX] REP-010 - License entries have a valid structure (2x)
+      Example: /components/0/licenses/0/license/id: Apache 2.0 -> Apache-2.0
+
+[FIX] SAN-021 - Remove dependency edges that point to nothing (2x)
+      Example: /dependencies/0/dependsOn/1 removed:
+               pkg:npm/does-not-exist@9.9.9
+
+[FIX] CXN-011 - metadata is timestamp, tools and component (1x)
+      Example: /metadata/component = {"type": "application", "name": ""}
+
+[FIX] CXN-030 - Every component has a licence (1x)
+      Example: /components/2/licenses = [{"license": {"name": "NOASSERTION"}}]
+
+[FIX] PRUNE-001 - Fields the schema of this version does not allow (1x)
+      Example: /components/0/x-scanner-internal removed: {"scanId": 991}
+
+[FIX] REP-001 - $schema matches specVersion (1x)
+      Example: /$schema: http://cyclonedx.org/schema/bom-1.4.schema... ->
+               http://cyclonedx.org/schema/bom-1.6.schema...
+
+[FIX] REP-004 - Scalars have the type the schema expects (1x)
+      Example: /components/2/version: 2.11 -> 2.11
+
+[FIX] REP-007 - serialNumber is a urn:uuid (1x)
+      Example: /serialNumber: DEMO-0001 ->
+               urn:uuid:e6a2b683-542f-5212-8766-80162174bc8e
+
+[FIX] REP-008 - Timestamps are ISO 8601 date-times (1x)
+      Example: /metadata/timestamp: 2026-10-02 10:00 -> 2026-10-02T10:00:00Z
+
+[FIX] REP-009 - URLs are valid IRI references (1x)
+      Example: /components/0/externalReferences/0/url:
+               https://registry.npmjs.org/lodash/-/lodash... ->
+               https://registry.npmjs.org/lodash/-/lodash...
+
+[FIX] REP-011 - Hash values match their algorithm (1x)
+      Example: /components/0/hashes/0 removed: {"alg": "SHA-256", "content":
+               "not-a-real-hash"}
+
+[FIX] SAN-011 - Build missing purls when the ecosystem is certain (1x)
+      Example: /components/2/purl = pkg:maven/commons-io/commons-io@2.11
+
+[FIX] SAN-013 - Add a default tool when none is named (1x)
+      Example: /metadata/tools = {"components": [{"type": "application",
+               "name": "sbom-fix...
+
+[FIX] SAN-020 - Unique bom-refs (1x)
+      Example: /components/1/bom-ref: pkg:npm/lodash@4.17.20 ->
+               pkg:npm/lodash@4.17.20#2
+
+[FIX] SAN-022 - Merge components with the same purl (1x)
+      Example: /components/1 removed: {"bom-ref": "pkg:npm/lodash@4.17.20#2",
+               "type": "library"...
+
+[LAYOUT] CXN-011 - metadata is timestamp, tools and component (2x)
+      Example: /metadata/tools: {"components": [{"type": "application", "n...
+               -> [{"vendor": "AppThreat", "name": "cycloned...
+
+[LAYOUT] CXN-040 - Components reduced to the fields Checkmarx reads (2x)
+      Example: /components/0 removed: {"evidence": {"identity": [{"field":
+               "purl", "confidence"...
+
+[LAYOUT] CXN-010 - Top level is bomFormat, specVersion, serialNumber, version,
+metadata, components, dependencies (1x)
+      Example: /$schema removed:
+               http://cyclonedx.org/schema/bom-1.6.schema.json
+
+[LAYOUT] CXN-030 - Every component has a licence (1x)
+      Example: /components/0/licenses: [{"license": {"id": "Apache-2.0",
+               "acknowl... -> [{"license": {"id": "Apache-2.0"}}]
+
+[LAYOUT] SAN-090 - Record sbom-fixer provenance (1x)
+      Example: /metadata = sbom-fixer provenance
+

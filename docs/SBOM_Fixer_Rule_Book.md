@@ -6,7 +6,7 @@ Installation, daily use and rule reference for `sbom-fixer` 1.0.0. Follow the st
 |---|---|
 | Tool | `sbom-fixer` 1.0.0 (Python command-line tool) |
 | Commands | `fix` (correct any SBOM for Checkmarx), `fill-all` (fill every schema field), `verify` (upload to Checkmarx and check the import) |
-| What `fix` does | Converts any CycloneDX or SPDX 2.x JSON to CycloneDX, repairs it on its own schema version, writes the layout Checkmarx ingests, and explains every change in two Markdown files |
+| What `fix` does | Converts any CycloneDX or SPDX 2.x JSON to CycloneDX, repairs it on its own schema version, writes the layout Checkmarx ingests, and explains every change in two plain-text files |
 | Works on | Windows 10/11, Linux, macOS, or any machine with Docker |
 | Needs | Python 3.11 or newer (3.12 recommended); internet only for installing packages. sbomqs is in the repository (`tools\sbomqs`), nothing to download for the quality score |
 | Source folder | `sbom-fixer` (README.md, CHANGELOG.md, docs/ inside it) |
@@ -227,11 +227,11 @@ Expected: `sbom-fixer 1.0.0`, and the three commands `fix`, `fill-all` and `veri
 sbom-fixer fix examples\demo-broken.cdx.json --out examples\out
 ```
 
-Expected: `original : 13 schema error(s)`, `sbom : ... (schema-valid CycloneDX 1.6)`, `exit code : 1`, and three files in `examples\out`: `demo-broken.corrected.cdx.json`, `demo-broken.tech-notes.md` and `demo-broken.suggestions.md`. The same three files are in `examples\` for comparison.
+Expected: `original : 13 schema error(s)`, `sbom : ... (schema-valid CycloneDX 1.6)`, `exit code : 1`, and three files in `examples\out`: `demo-broken.corrected.cdx.json`, `demo-broken.tech-notes.txt` and `demo-broken.suggestions.txt`. The same three files are in `examples\` for comparison.
 
 **Check 3 – The quality score works offline:**
 
-Open `examples\out\demo-broken.tech-notes.md`. The summary line "NTIA minimum elements after the fix" shows an sbomqs score (for example `sbomqs 4.9`). If there is no score, see Step 13.6.
+Open `examples\out\demo-broken.tech-notes.txt`. The summary line "NTIA minimum elements after the fix" shows an sbomqs score (for example `sbomqs 4.9`). If there is no score, see Step 13.6.
 
 **Check 4 – (Developers only) Run the tests:**
 
@@ -273,8 +273,8 @@ sbom.json: cyclonedx 1.5 -> converted to CycloneDX 1.5
   tool       : Tool cyclonedx-java for the ecosystem java: 320 of 320 components
   changes    : 703 (323 WARN, 0 DATA_LOSS)
   sbom       : build\sbom-fixed\sbom.corrected.cdx.json (schema-valid CycloneDX 1.5)
-  tech notes : build\sbom-fixed\sbom.tech-notes.md
-  suggestions: build\sbom-fixed\sbom.suggestions.md
+  tech notes : build\sbom-fixed\sbom.tech-notes.txt
+  suggestions: build\sbom-fixed\sbom.suggestions.txt
   exit code  : 1
 ```
 
@@ -302,12 +302,12 @@ PowerShell and cmd use the same command. In PowerShell a path with spaces needs 
 
 0 and 1 mean the file is ready. 2 or higher means it is not (Step 10).
 
-### 8.4 Read the two Markdown files
+### 8.4 Read the two plain-text files
 
-- `sbom.tech-notes.md`: what was changed, with a summary (Step 09).
-- `sbom.suggestions.md`: what is wrong in the original and how to fix it at the generator. Fix these at the source so the next SBOM is correct on its own.
+- `sbom.tech-notes.txt`: what was changed, with a summary (Step 09).
+- `sbom.suggestions.txt`: what is wrong in the original and how to fix it at the generator. Fix these at the source so the next SBOM is correct on its own.
 
-Open them in any editor; VS Code and IntelliJ show them formatted (Markdown preview).
+Open them in any editor; Notepad is enough.
 
 ### 8.5 Upload to Checkmarx
 
@@ -353,8 +353,8 @@ For an input `sbom.json`, `fix` writes exactly three files:
 | File | What it is | Who uses it |
 |---|---|---|
 | `sbom.corrected.cdx.json` | The corrected SBOM: CycloneDX in the canonical form, UTF-8 without BOM, schema-valid | Upload to Checkmarx |
-| `sbom.tech-notes.md` | What was changed, with a summary | Reviewers, the platform team |
-| `sbom.suggestions.md` | Issues of the original and how to fix them at the generator | The team that owns the SBOM |
+| `sbom.tech-notes.txt` | What was changed, with a summary | Reviewers, the platform team |
+| `sbom.suggestions.txt` | Issues of the original and how to fix them at the generator | The team that owns the SBOM |
 
 **Tech notes** sections:
 

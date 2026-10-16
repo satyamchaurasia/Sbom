@@ -1,10 +1,11 @@
-"""The two Markdown files of the corrected command: tech notes (what changed, with a summary) and suggestions (issues of the
-original SBOM, to fix at the generator)."""
+"""The two plain-text files of the fix command: tech notes (what changed, with a summary) and suggestions (issues of the
+original SBOM, to fix at the generator). Plain .txt, short lines, no Markdown: they are meant to be read as they are."""
 
 from __future__ import annotations
 
 import json
 import re
+import textwrap
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -94,15 +95,33 @@ class OriginalCheck:
     labels: dict[str, str] = field(default_factory=dict)  # bom-ref / SPDXID -> name@version
 
 
-def _code(text: str) -> str:
-    """A path as inline code that cannot break a Markdown table (a pipe splits a cell even inside backticks)."""
-    return "`" + text.replace("`", "'").replace("|", "\\|").replace("\r", " ").replace("\n", " ") + "`"
+_WIDTH = 78
+
+
+def _plain(text: str) -> str:
+    """A path or value on one line."""
+    return text.replace("\r", " ").replace("\n", " ")
 
 
 def _short(value: Any, limit: int = 90) -> str:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
-    text = text.replace("|", "\\|").replace("\r", " ").replace("\n", " ").replace("`", "'")
+    text = _plain(text)
     return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def _wrap(text: str, first: str = "", rest: str | None = None) -> str:
+    """Wrap to the page width; long words (paths, purls) are never broken."""
+    return textwrap.fill(text, _WIDTH, initial_indent=first, subsequent_indent=first if rest is None else rest,
+                         break_long_words=False, break_on_hyphens=False)
+
+
+def _field(label: str, value: str, indent: int = 3, width: int = 14) -> str:
+    """'   Label         : value', wrapped under the value."""
+    return _wrap(value, " " * indent + f"{label:<{width}}: ", " " * (indent + width + 2))
+
+
+def _heading(title: str) -> list[str]:
+    return [title, "-" * len(title)]
 
 
 def _by_rule(changes: list[Change]) -> list[tuple[str, list[Change]]]:
@@ -121,10 +140,10 @@ def _title(rule_id: str) -> str:
 
 def _example(c: Change) -> str:
     if c.action == "removed":
-        return f"{_code(c.path)} removed: {_short(c.before, 60)}"
+        return f"{_plain(c.path)} removed: {_short(c.before, 60)}"
     if c.before is None:
-        return f"{_code(c.path)} = {_short(c.after, 60)}"
-    return f"{_code(c.path)}: {_short(c.before, 45)} -> {_short(c.after, 45)}"
+        return f"{_plain(c.path)} = {_short(c.after, 60)}"
+    return f"{_plain(c.path)}: {_short(c.before, 45)} -> {_short(c.after, 45)}"
 
 
 def _components(doc: Any) -> int:
@@ -136,69 +155,69 @@ def tech_notes(result: RunResult, conv: Conversion, original: OriginalCheck, sbo
     doc = result.fixed_doc if result.ok else None
     issues = [c for c in result.log.changes if is_issue(c)]
     reductions = [c for c in result.log.changes if not is_issue(c)]
-    L: list[str] = [f"# Tech notes: {original.name}", ""]
-    L += ["## Summary", ""]
-    L.append(f"- **Input:** {conv.source_spec} {conv.source_version}"
-             + (f", generator {original.generator}" if original.generator else "")
-             + f", {original.components:,} component(s)")
+    L: list[str] = ["WHAT SBOM-FIXER CHANGED", "=" * 23, f"File: {original.name}", ""]
+    L += _heading("1. SUMMARY")
+    L.append(_field("Input", f"{conv.source_spec} {conv.source_version}"
+                    + (f", made by {original.generator}" if original.generator else "")
+                    + f", {original.components:,} component(s)"))
     if doc is not None:
         deps = doc.get("dependencies")
-        L.append(f"- **Output:** `{sbom_name}`, CycloneDX {result.final_version} "
-                 f"(schema-valid), {_components(doc):,} component(s), "
-                 f"{len(deps) if isinstance(deps, list) else 0:,} dependency entries")
+        L.append(_field("Output", f"{sbom_name} - CycloneDX {result.final_version}, schema-valid, "
+                        f"{_components(doc):,} component(s), {len(deps) if isinstance(deps, list) else 0:,} dependency entries"))
     else:
-        L.append(f"- **Output:** `{sbom_name}` was NOT written: {result.error or 'schema errors remain'}")
-    L.append(f"- **Tool in metadata:** {tool_line}")
-    L.append(f"- **Changes:** {len(result.log.changes):,} in total; {len(issues):,} fixed problems of the input, "
-             f"{len(reductions):,} layout changes for Checkmarx")
-    L.append(f"- **Original schema errors:** not validated as it is ({original.error})" if original.error
-             else f"- **Original schema errors:** {len(original.issues):,} (details in the suggestions file)")
-    L.append(f"- **Exit code:** {result.exit_code} ({_EXIT_TEXT.get(result.exit_code, 'see README')})")
+        L.append(_field("Output", f"{sbom_name} was NOT written: {result.error or 'schema errors remain'}"))
+    L.append(_field("Tool name", tool_line))
+    L.append(_field("Changes", f"{len(result.log.changes):,} in total: {len(issues):,} repairs of problems in your file, "
+                    f"{len(reductions):,} layout changes for Checkmarx"))
+    L.append(_field("Schema errors", f"not validated as it is ({original.error})" if original.error
+                    else f"{len(original.issues):,} in your original file (see the suggestions file)"))
+    L.append(_field("Result", f"exit code {result.exit_code} - {_EXIT_TEXT.get(result.exit_code, 'see README')}"))
     corrected_ntia = corrected_ntia_of(result)
     if original.ntia is not None:
-        L.append(f"- **NTIA minimum elements (original):** {ntia_summary(original.ntia)}")
+        L.append(_field("NTIA original", ntia_summary(original.ntia)))
     if corrected_ntia is not None:
-        L.append(f"- **NTIA minimum elements (corrected):** {ntia_summary(corrected_ntia)}"
-                 + (f", sbomqs {result.quality.after_score:.1f}"
-                    if result.quality is not None and result.quality.after_score is not None else ""))
+        L.append(_field("NTIA corrected", ntia_summary(corrected_ntia)
+                        + (f"  (sbomqs score {result.quality.after_score:.1f} of 10)"
+                           if result.quality is not None and result.quality.after_score is not None else "")))
     L.append("")
     if original.ntia is not None or corrected_ntia is not None:
-        L += ["## NTIA minimum elements", ""] + _ntia_table(original.ntia, corrected_ntia)
-        L += ["", "The corrected file keeps only what Checkmarx reads (no supplier, no author), so its NTIA result is "
-                  "usually FAIL. Use the original for NTIA; fix the gaps of the original at the source "
-                  "(suggestions file).", ""]
+        L += _heading("2. NTIA MINIMUM ELEMENTS") + _ntia_table(original.ntia, corrected_ntia)
+        L += ["", _wrap("The corrected file keeps only what Checkmarx reads (no supplier, no author), so its NTIA "
+                        "result is usually FAIL. Use the original file for NTIA, and close the gaps of the original at "
+                        "the source (see the suggestions file)."), ""]
 
-    L += ["## What was done", "",
-          f"1. **Converted** ({conv.source_spec} {conv.source_version} -> CycloneDX "
-          f"{conv.target_version})."]
-    L += [f"   - {n}" for n in conv.notes]
-    L.append(f"2. **Validated** the converted file against the CycloneDX {conv.target_version} schema: "
-             f"{len(result.original_issues):,} error(s).")
+    L += _heading("3. WHAT WAS DONE")
+    L.append(_wrap(f"Step 1 - Converted: {conv.source_spec} {conv.source_version} -> CycloneDX {conv.target_version}."))
+    L += [_wrap(n, "   - ", "     ") for n in conv.notes]
+    L.append(_wrap(f"Step 2 - Checked the converted file against the CycloneDX {conv.target_version} schema: "
+                   f"{len(result.original_issues):,} error(s)."))
     for kw, pth, n, msg in group(result.original_issues)[:10]:
-        L.append(f"   - {n:,} x `{kw}` at {_code(pth)}: {_short(msg, 100)}")
-    L.append("3. **Repaired and reduced to the Checkmarx layout** on the same CycloneDX version "
-             "(specVersion is never changed). Output layout:")
-    L += ["   - top level: `bomFormat`, `specVersion`, `serialNumber`, `version`, `metadata`, `components`, "
-          "`dependencies` (`components` is always there, `[]` when the input has none)",
-          "   - `metadata`: `timestamp`, `tools`, `component` (the root application)",
-          "   - each component: `bom-ref`, `type`, `name`, `version`, `purl`, `licenses` (NOASSERTION when unknown)",
-          "   - no `externalReferences`, `properties`, `evidence`, `description`; no purl or bom-ref with http(s)",
-          "   - dependencies only between components in the file, no self-dependencies", ""]
+        L.append(_wrap(f"{n:,} x {kw} at {_plain(pth)}: {_short(msg, 100)}", "   - ", "     "))
+    L.append(_wrap("Step 3 - Repaired it and reduced it to the layout Checkmarx reads, on the same CycloneDX version "
+                   "(the version is never changed). The result looks like this:"))
+    L += [_wrap(t, "   - ", "     ") for t in (
+        "top level: bomFormat, specVersion, serialNumber, version, metadata, components, dependencies "
+        "(components is always there, [] when the input has none)",
+        "metadata: timestamp, tools, component (the root application)",
+        "each component: bom-ref, type, name, version, purl, licenses (NOASSERTION when unknown)",
+        "removed: externalReferences, properties, evidence, description, and any purl or bom-ref with http(s)",
+        "dependencies only between components in the file, no self-dependencies")] + [""]
 
-    L += ["## Changes by rule", "", "| Rule | What | Kind | Count | Example |", "|---|---|---|---:|---|"]
-    for kind, items_of_kind in (("fix", issues), ("layout", reductions)):
+    L += _heading("4. CHANGES MADE (one entry per rule)")
+    L += [_wrap("FIX    = a problem in your file that was repaired."),
+          _wrap("LAYOUT = reshaped for Checkmarx. Data Checkmarx does not read is dropped from this copy only; "
+                "your original file keeps it."), ""]
+    for kind, items_of_kind in (("FIX", issues), ("LAYOUT", reductions)):
         for rid, items in _by_rule(items_of_kind):
-            L.append(f"| {rid} | {_title(rid)} | {kind} | {len(items):,} | {_example(items[0])} |")
+            L.append(_wrap(f"[{kind}] {rid} - {_title(rid)} ({len(items):,}x)"))
+            L.append(_wrap(f"Example: {_example(items[0])}", "      ", "               "))
+            L.append("")
     if not result.log.changes:
-        L.append("| - | no changes | - | 0 | - |")
-    L.append("")
-    L.append("*fix* = a problem of the input that was repaired; *layout* = reshaped for the Checkmarx layout; data Checkmarx does not read is dropped from "
-             "this copy only (the original file keeps it).")
-    L.append("")
+        L += ["No changes were needed.", ""]
     if result.log.findings:
-        L += ["## Not changed (findings)", ""]
+        L += _heading("5. NOTICED BUT NOT CHANGED")
         for f in result.log.findings[:30]:
-            L.append(f"- [{f.rule_id}] {_code(f.path or '/')}: {f.message}")
+            L.append(_wrap(f"[{f.rule_id}] {_plain(f.path or '/')}: {f.message}", "- ", "  "))
         if len(result.log.findings) > 30:
             L.append(f"- ... {len(result.log.findings) - 30:,} more")
         L.append("")
@@ -292,14 +311,18 @@ def _ntia_table(original: NtiaReport | None, corrected: NtiaReport | None) -> li
             return "-"
         if name in report.components:
             cov = report.components[name]
-            return f"{cov.covered:,} / {cov.total:,}" + ("" if cov.complete else " ✗")
-        return "yes" if report.document.get(name) else "no ✗"
+            return f"{cov.covered:,} / {cov.total:,}" + ("" if cov.complete else "  (gap)")
+        return "yes" if report.document.get(name) else "NO  (gap)"
 
-    rows = ["| NTIA element | Original | Corrected |", "|---|---|---|"]
-    rows += [f"| {name} | {cell(original, name)} | {cell(corrected, name)} |" for name in COMPONENT_FIELDS + DOC_FIELDS]
+    names = COMPONENT_FIELDS + DOC_FIELDS
+    rows = [(name, cell(original, name), cell(corrected, name)) for name in names]
     verdict = [("PASS" if r.passed else "FAIL") if r is not None else "-" for r in (original, corrected)]
-    rows.append(f"| **Result** | **{verdict[0]}** | **{verdict[1]}** |")
-    return rows
+    rows.append(("RESULT", verdict[0], verdict[1]))
+    w0 = max(len(r[0]) for r in [*rows, ("NTIA element", "", "")])
+    w1 = max(len(r[1]) for r in [*rows, ("", "Original", "")])
+    out = [f"   {'NTIA element':<{w0}}   {'Original':<{w1}}   Corrected", f"   {'-' * w0}   {'-' * w1}   {'-' * 12}"]
+    out += [f"   {a:<{w0}}   {b:<{w1}}   {c}" for a, b, c in rows]
+    return out
 
 
 def _short_issue(change: Change) -> tuple[str, str]:
@@ -334,23 +357,16 @@ def suggestions(result: RunResult, original: OriginalCheck) -> str:
     for c in result.log.changes:
         if is_issue(c) and not (original.issues and c.rule_id.startswith(_SCHEMA_REPAIRS)):
             rows.setdefault(_short_issue(c), []).append(_which(c, doc))
-    L: list[str] = [f"# Suggestions: {original.name}", ""]
-    if original.error:
-        L += [f"Not checked against a schema: {original.error}", ""]
-    if not rows and not original.issues and not original.error and (original.ntia is None or original.ntia.passed):
-        return "\n".join(L + ["No issues found. Nothing to fix.", ""])
-    L += ["| # | Missing / wrong | Count | Components | Fix |", "|---:|---|---:|---|---|"]
-    n = 0
+    # (what is wrong, how many, which components, how to fix it)
+    found: list[tuple[str, str, str, str]] = []
     for kw, pth, cnt, msg in group(original.issues):
-        n += 1
-        hint = _SCHEMA_HINTS.get(kw, "Check the field against the schema.")
-        L.append(f"| {n} | Schema error at {_code(pth)}: {_short(msg, 70)} | {cnt:,} | - | {hint} |")
+        found.append((f"Schema error at {_plain(pth)}: {_short(msg, 70)}", f"{cnt:,} time(s)", "",
+                      _SCHEMA_HINTS.get(kw, "Check the field against the schema.")))
     for (issue, fix), names in sorted(rows.items(), key=lambda kv: -len(kv[1])):
-        n += 1
         known = sorted({x for x in names if x})
         count = len(known) if known and None not in names else len(names)
-        shown = ", ".join(_short(x, 40) for x in known[:5]) + (f" +{len(known) - 5} more" if len(known) > 5 else "")
-        L.append(f"| {n} | {_short(issue, 90)} | {count:,} | {shown or '-'} | {_short(fix, 160)} |")
+        shown = ", ".join(_short(x, 40) for x in known[:5]) + (f" ... and {len(known) - 5} more" if len(known) > 5 else "")
+        found.append((_short(issue, 90), f"{count:,} component(s)", shown, fix))
     if original.ntia is not None:
         for name in COMPONENT_FIELDS:
             cov = original.ntia.components.get(name)
@@ -359,19 +375,28 @@ def suggestions(result: RunResult, original: OriginalCheck) -> str:
             issue, fix = _NTIA_ROWS[name]
             shown = ", ".join(_short(original.labels.get(x) or _ntia_label(x), 40) for x in cov.missing_examples[:5])
             more = cov.missing - min(len(cov.missing_examples), 5)
-            n += 1
-            L.append(f"| {n} | {issue} | {cov.missing:,} of {cov.total:,} | {shown}{f' +{more} more' if more > 0 else ''} "
-                     f"| {_short(fix, 200)} |")
+            found.append((issue, f"{cov.missing:,} of {cov.total:,} components", shown + (f" ... and {more} more" if more > 0 else ""), fix))
         for name in DOC_FIELDS:
-            if original.ntia.document.get(name, True):
-                continue
-            issue, fix = _NTIA_ROWS[name]
-            n += 1
-            L.append(f"| {n} | {issue} | - | - | {_short(fix, 200)} |")
-    fixes = {fix for _, fix in rows}
-    for hint in (h for h in _generator_hints(result, original) if h not in fixes):
-        n += 1
-        L.append(f"| {n} | Pipeline | - | - | {hint} |")
+            if not original.ntia.document.get(name, True):
+                issue, fix = _NTIA_ROWS[name]
+                found.append((issue, "", "", fix))
+    fixes = {fix for _, _, _, fix in found} | {fix for _, fix in rows}
+    found += [("Pipeline", "", "", hint) for hint in _generator_hints(result, original) if hint not in fixes]
+
+    L: list[str] = ["WHAT TO FIX IN YOUR SBOM", "=" * 24, f"File: {original.name}", ""]
+    if original.error:
+        L += [_wrap(f"Not checked against a schema: {original.error}"), ""]
+    if not found and not original.error:
+        return "\n".join(L + ["No issues found. Nothing to fix.", ""])
+    L += [_wrap(f"{len(found)} problem(s) found in your original file. Fix them in the tool that creates the SBOM "
+                f"(your generator or build), then run sbom-fixer again."), ""]
+    for n, (issue, count, shown, fix) in enumerate(found, 1):
+        L.append(_wrap(f"{n}. {issue}", "", "   "))
+        if count:
+            L.append(_field("How many", count))
+        if shown:
+            L.append(_field("Which", shown))
+        L += [_field("How to fix", fix), ""]
     return "\n".join(L) + "\n"
 
 

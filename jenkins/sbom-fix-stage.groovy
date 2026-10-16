@@ -2,7 +2,7 @@
 // Exit codes: 0 unchanged, 1 corrected, 2 cannot fix, 3 forbidden data loss, 4 quality gate,
 // 7 no component has a purl type Checkmarx supports (Checkmarx would fail the scan).
 // The upload below uses the cx CLI, so the profile is checkmarx-cli (same versions as checkmarx: 1.6 and 1.7 are kept).
-// Outputs: sbom.corrected.cdx.json (uploaded), sbom.tech-notes.md (what changed), sbom.suggestions.md (fix at the source).
+// Outputs: sbom.corrected.cdx.json (uploaded), sbom.tech-notes.txt (what changed), sbom.suggestions.txt (fix at the source).
 stage('SBOM: correct for Checkmarx') {
   steps {
     sh '''
@@ -12,7 +12,7 @@ stage('SBOM: correct for Checkmarx') {
       rc=$?
       set -e
       if [ "$rc" -ge 2 ]; then
-        echo "sbom-fixer exit code $rc - see build/sbom-fixed/sbom.tech-notes.md"
+        echo "sbom-fixer exit code $rc - see build/sbom-fixed/sbom.tech-notes.txt"
         exit "$rc"
       fi
     '''

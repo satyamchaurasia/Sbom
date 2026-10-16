@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -205,32 +206,33 @@ def test_cli_ratecard_java(tmp_path: Path) -> None:
     assert res.exit_code == 1, res.output
     assert "cyclonedx-java" in res.output
     # exactly three files: the fixed SBOM, the tech notes and the suggestions
-    assert {p.name for p in tmp_path.iterdir()} == {"ratecard-sbom.corrected.cdx.json", "ratecard-sbom.tech-notes.md",
-                                                     "ratecard-sbom.suggestions.md"}
+    assert {p.name for p in tmp_path.iterdir()} == {"ratecard-sbom.corrected.cdx.json", "ratecard-sbom.tech-notes.txt",
+                                                     "ratecard-sbom.suggestions.txt"}
     out = json.loads((tmp_path / "ratecard-sbom.corrected.cdx.json").read_text(encoding="utf-8"))
     assert tool_name(out) == "cyclonedx-java" and out["specVersion"] == "1.5"
     assert list(out)[:4] == ["bomFormat", "specVersion", "serialNumber", "version"]
     assert validate(out, "cyclonedx", "1.5") == []
     assert all(set(c) <= {"bom-ref", "type", "name", "version", "purl", "licenses"} for c in out["components"])
-    notes = (tmp_path / "ratecard-sbom.tech-notes.md").read_text(encoding="utf-8")
-    assert "## Summary" in notes and "Tool cyclonedx-java" in notes and "| CXN-040 |" in notes
-    advice = (tmp_path / "ratecard-sbom.suggestions.md").read_text(encoding="utf-8")
-    # one short row per problem: what is missing, how many, which components, how to fix it
-    assert "| # | Missing / wrong | Count | Components | Fix |" in advice
-    assert "| No licence | 13 | antlr-runtime@3.4" in advice
+    notes = (tmp_path / "ratecard-sbom.tech-notes.txt").read_text(encoding="utf-8")
+    assert "1. SUMMARY" in notes and "Tool cyclonedx-java" in notes and "CXN-040 -" in notes
+    advice = (tmp_path / "ratecard-sbom.suggestions.txt").read_text(encoding="utf-8")
+    # one short entry per problem: what is missing, how many, which components, how to fix it
+    assert "1. No licence" + "\n   How many      : 13 component(s)" + "\n   Which         : antlr-runtime@3.4" in advice
+    assert "How to fix    :" in advice and "|" not in advice and "`" not in advice
     # NTIA gaps of the original: 248 of 320 components without supplier, no SBOM author
-    assert "| No supplier (NTIA) | 248 of 320 | bean-matchers@0.13" in advice
-    assert "| No SBOM author (NTIA) |" in advice
+    assert ("No supplier (NTIA)" + "\n   How many      : 248 of 320 components"
+            + "\n   Which         : bean-matchers@0.13") in advice
+    assert ". No SBOM author (NTIA)" in advice
     # qualifiers dropped for Checkmarx are not an issue of the original
-    assert "?type=jar" not in advice and len(advice.splitlines()) == 7
+    assert "?type=jar" not in advice
     assert "ntia       : original FAIL - supplier 72/320, author missing" in res.output
-    assert "| Supplier name | 72 / 320 ✗ | 0 / 320 ✗ |" in notes
+    assert re.search(r"Supplier name\s+72 / 320  \(gap\)\s+0 / 320  \(gap\)", notes)
     again = runner.invoke(app, ["fix", str(tmp_path / "ratecard-sbom.corrected.cdx.json"), "--out",
                                 str(tmp_path / "again"), "--no-audit", "--name", "out.json"])
     assert again.exit_code == 0, again.output
     assert json.loads((tmp_path / "again" / "out.json").read_text(encoding="utf-8")) == out
     # nothing left to repair; only the NTIA gaps of the canonical form (it keeps no supplier or author)
-    again_advice = next((tmp_path / "again").glob("*.suggestions.md")).read_text(encoding="utf-8")
+    again_advice = next((tmp_path / "again").glob("*.suggestions.txt")).read_text(encoding="utf-8")
     assert "No licence" not in again_advice and "No supplier (NTIA)" in again_advice
 
 
@@ -326,21 +328,21 @@ def test_cli_reports_schema_validation_of_converted_file(tmp_path: Path) -> None
     assert "original   : 5 schema error(s)" in res.output
     assert "schema: 5 error(s) -> repaired" in res.output
     assert "schema-valid CycloneDX 1.5" in res.output
-    notes = (tmp_path / "orders-service.tech-notes.md").read_text(encoding="utf-8")
-    assert "CycloneDX 1.5 schema: 5 error(s)" in notes
-    advice = (tmp_path / "orders-service.suggestions.md").read_text(encoding="utf-8")
-    assert sum(row.count("| Schema error at ") for row in advice.splitlines()) >= 3  # 5 errors, grouped by cause
+    notes = (tmp_path / "orders-service.tech-notes.txt").read_text(encoding="utf-8")
+    assert "CycloneDX 1.5 schema: 5 error(s)" in " ".join(notes.split())
+    advice = (tmp_path / "orders-service.suggestions.txt").read_text(encoding="utf-8")
+    assert advice.count(". Schema error at ") >= 3  # 5 errors, grouped by cause
 
 
 def test_tool_bookkeeping_and_layout_are_not_issues(tmp_path: Path) -> None:
     res = runner.invoke(app, ["fix", str(CORPUS / "vendor" / "acme-portal.cdx.json"), "--out", str(tmp_path),
                               "--no-audit"])
     assert res.exit_code == 1, res.output
-    advice = (tmp_path / "acme-portal.suggestions.md").read_text(encoding="utf-8")
+    advice = (tmp_path / "acme-portal.suggestions.txt").read_text(encoding="utf-8")
     # the schema errors (serialNumber, unknown field, null) and the data problems of the original
-    assert "Schema error at `/serialNumber`" in advice
-    assert "| Dependency on a component that is not in the SBOM |" in advice
-    assert "| No root component (metadata.component) |" in advice
+    assert "Schema error at /serialNumber" in advice
+    assert ". Dependency on a component that is not in the SBOM" in advice
+    assert ". No root component (metadata.component)" in advice
     # repairs of those schema errors are not listed twice; layout trims and sbom-fixer's bookkeeping are not issues
     for text in ("serialNumber is not urn:uuid", "provenance", "metadata.tools", "not read by Checkmarx", "REP-", "CXN-"):
         assert text not in advice, text

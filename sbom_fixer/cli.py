@@ -44,8 +44,8 @@ def fix(
     dependencies only to existing components. metadata.tools names the generator of the detected ecosystem
     (.NET -> cyclonedx-dotnet, Java -> cyclonedx-java, ...; --ecosystem overrides). No purl or bom-ref holds http(s).
 
-    Writes three files: <name>.corrected.cdx.json (--name), <name>.tech-notes.md (what changed, with a summary) and
-    <name>.suggestions.md (issues of the original SBOM and how to fix them at the generator). Exit codes as for fix.
+    Writes three files: <name>.corrected.cdx.json (--name), <name>.tech-notes.txt (what changed, with a summary) and
+    <name>.suggestions.txt (issues of the original SBOM and how to fix them at the generator). Exit codes as for fix.
     """
     import dataclasses
     import tempfile
@@ -84,8 +84,8 @@ def fix(
 
     tool_line = next((c.reason for c in r.log.changes if c.rule_id == "CXN-011" and c.path == "/metadata/tools"),
                      next((f.message for f in r.log.findings if f.rule_id == "CXN-011"), "tools unchanged"))
-    notes_path = out_dir / f"{stem}.tech-notes.md"
-    advice_path = out_dir / f"{stem}.suggestions.md"
+    notes_path = out_dir / f"{stem}.tech-notes.txt"
+    advice_path = out_dir / f"{stem}.suggestions.txt"
     write_text(tech_notes(r, conv, original, sbom_name, tool_line), notes_path)
     write_text(suggestions(r, original), advice_path)
 

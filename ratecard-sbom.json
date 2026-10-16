@@ -11,15 +11,8 @@
         "name" : "cyclonedx-gradle-plugin",
         "version" : "1.10.0"
       }
-    ],
-    "component" : {
-      "type" : "application",
-      "bom-ref" : "pkg:maven/com.sintecmedia.ratecard/ratecards@1.0?type=jar",
-      "group" : "com.sintecmedia.ratecard",
-      "name" : "ratecards",
-      "version" : "1.0",
-      "purl" : "pkg:maven/com.sintecmedia.ratecard/ratecards@1.0?type=jar"
-    }
+    ]
+    
   },
   "components" : [
     {

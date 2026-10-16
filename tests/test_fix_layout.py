@@ -4,6 +4,7 @@ blank (never invented), registry-URL purls only for the same package, and Markdo
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -83,8 +84,9 @@ def test_dll_components_get_the_package_purl_and_version(tmp_path: Path) -> None
     # no cache path: the file name is never turned into pkg:nuget/MyCompany.Core.dll
     assert got["MyCompany.Core.dll"] == ("1.0.0.0", "pkg:generic/MyCompany.Core.dll@1.0.0.0")
     assert got["Polly"] == ("8.2.0", "pkg:nuget/Polly@8.2.0")
-    advice = (folder / "app.suggestions.md").read_text(encoding="utf-8")
-    assert "| DLL/JAR without a package purl (found in the package cache) | 2 | Newtonsoft.Json.dll@13.0.3, Serilog.dll@3.1.1 |" in advice
+    advice = (folder / "app.suggestions.txt").read_text(encoding="utf-8")
+    assert ("DLL/JAR without a package purl (found in the package cache)" + "\n   How many      : 2 component(s)"
+            + "\n   Which         : Newtonsoft.Json.dll@13.0.3, Serilog.dll@3.1.1") in advice
 
 
 # ---------------------------------------------------------------- a second run changes nothing
@@ -147,16 +149,15 @@ def test_registry_url_of_another_package_is_not_used(tmp_path: Path) -> None:
 def test_pipes_in_paths_do_not_break_tables(tmp_path: Path) -> None:
     doc = {"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1, "a|b": 1, "components": []}
     _, _, folder = run_fix(doc, tmp_path)
-    for name in ("in.tech-notes.md", "in.suggestions.md"):
-        for line in (folder / name).read_text(encoding="utf-8").splitlines():
-            if line.startswith("| ") and "a" in line and "b" in line and "removed" in line:
-                assert "a\\|b" in line
+    for name in ("in.tech-notes.txt", "in.suggestions.txt"):
+        text = (folder / name).read_text(encoding="utf-8")
+        assert "\\|" not in text
 
 
 def test_non_sbom_json_says_it_was_not_validated(tmp_path: Path) -> None:
     _, output, folder = run_fix({}, tmp_path)
     assert "not validated as it is" in output and "0 schema error(s)" not in output
-    assert "not validated as it is" in (folder / "in.tech-notes.md").read_text(encoding="utf-8")
+    assert "not validated as it is" in (folder / "in.tech-notes.txt").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------- NTIA of the original
@@ -171,14 +172,15 @@ def test_ntia_gaps_of_the_original_are_reported(tmp_path: Path) -> None:
             "dependencies": [{"ref": "app", "dependsOn": ["a"]}, {"ref": "a", "dependsOn": []}]}
     _, output, folder = run_fix(full, tmp_path, "full")
     assert "ntia       : original PASS" in output
-    advice = (folder / "full.suggestions.md").read_text(encoding="utf-8")
+    advice = (folder / "full.suggestions.txt").read_text(encoding="utf-8")
     assert "(NTIA)" not in advice
     gaps = json.loads(json.dumps(full))
     del gaps["metadata"]["authors"]
     del gaps["components"][0]["supplier"]
     _, output, folder = run_fix(gaps, tmp_path, "gaps")
     assert "ntia       : original FAIL - supplier 0/1, author missing" in output
-    advice = (folder / "gaps.suggestions.md").read_text(encoding="utf-8")
-    assert "| No supplier (NTIA) | 1 of 1 | a@1 |" in advice and "| No SBOM author (NTIA) |" in advice
-    notes = (folder / "gaps.tech-notes.md").read_text(encoding="utf-8")
-    assert "| Author of SBOM data | no ✗ | no ✗ |" in notes
+    advice = (folder / "gaps.suggestions.txt").read_text(encoding="utf-8")
+    assert "No supplier (NTIA)" + "\n   How many      : 1 of 1 components" + "\n   Which         : a@1" in advice
+    assert ". No SBOM author (NTIA)" in advice
+    notes = (folder / "gaps.tech-notes.txt").read_text(encoding="utf-8")
+    assert re.search(r"Author of SBOM data\s+NO  \(gap\)\s+NO  \(gap\)", notes)
